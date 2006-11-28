@@ -1,0 +1,754 @@
+#!/usr/bin/perl -w -- -*-Perl-*-
+
+##############################################################################
+#
+#                                 umac
+#
+# DESCRIPTION:
+# Ultimate Multiple Alignment Converter
+#
+##############################################################################
+
+##############################################################################
+#
+#    $Id: umac,v 1.1 2006/11/28 16:33:35 riouxp Exp $
+#
+#    $Log: umac,v $
+#    Revision 1.1  2006/11/28 16:33:35  riouxp
+#    Newly checked-in.
+#
+
+##########################
+# Initialization section #
+##########################
+
+require 5.00;
+use strict;
+use vars qw( $VERSION $RCS_VERSION $DEBUG );
+use PirObject qw( MultAlign );
+use IO::File;
+use IO::Dir;
+
+# Default umask
+umask 027;
+
+# Program's name and version number.
+$RCS_VERSION='$Id: umac,v 1.1 2006/11/28 16:33:35 riouxp Exp $';
+($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
+my ($BASENAME) = ($0 =~ /([^\/]+)$/);
+
+# Get login name.
+my $USER=getpwuid($<) || getlogin || die "Can't find USER from environment!\n";
+
+##################################
+# Global variables and constants #
+##################################
+
+$|=1;
+$DEBUG=0;
+
+# Arguments from command-line
+my $INFILE="";
+my $OUTFILE="";
+my $FORMAT="";
+my $PROGRAM="";
+my $VERBOSE=0;
+my $VALIDATE=0;
+
+# Long decription of each format's short keyword
+my %FORMAT_LONG = (
+    "Phylip-N" => "Phylip non-interleaved",
+    "Phylip-I" => "Phylip interleaved",
+    "FASTA"    => "FASTA (Pearson)",
+    "NEXUS"    => "NEXUS (Paup)",
+);
+
+my %PROG_TO_FORMAT = (
+    "RAxML"    => "Phylip-N",
+    "test3"    => "Phylip-N",
+    "test1"    => "Phylip-I",
+    "test2"    => "Phylip-I",
+    "jknife"   => "FASTA",
+    "paup"     => "NEXUS",
+);
+
+my %FORMAT_TO_PROGS = ();
+foreach my $prog (keys %PROG_TO_FORMAT) {
+    my $format = $PROG_TO_FORMAT{$prog};
+    $FORMAT_TO_PROGS{$format} ||= [];
+    push(@{$FORMAT_TO_PROGS{$format}},$prog);
+}
+
+#####################################
+# Command-Line Arguments Processing #
+#####################################
+
+sub Usage {
+    print "This is $BASENAME $VERSION\n",
+          "\n",
+          "Usage: $BASENAME [-@[n]] [-v] [-c] [-f format|-p program] [-i infile] [-o outfile]\n",
+          "\n",
+          "   -i is the input file, containing one or many multiple alignments\n",
+          "   -o is the output file, converted\n",
+          "   -f is the output format\n",
+          "   -p is an alternative to -f, where you specify which external program\n",
+          "      will use this output; the -f format will be selected for you\n",
+          "   -v makes the program more verbose\n",
+          "   -c tells the program to check the alignments for errors/inconsistencies\n",
+          "\n",
+          "Leaving -i and/or -o blank or supplying a single '-' can be used\n",
+          "to mean STDIN or STDOUT for the files.\n",
+          "\n";
+    &ListKnownFormats();
+    exit 20;
+}
+
+&Usage if @ARGV == 0;
+
+for (;@ARGV;) {
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvc])(.*)$/o);
+    last if ! defined $opt;
+    if ($opt =~ /[iofp]/ && $arg eq "") {
+        if (@ARGV < 2) {
+            print "Argument required for switch \"-$opt\".\n";
+            exit 1;
+        }
+        shift @ARGV;
+        $arg=$ARGV[0];
+    }
+
+    $DEBUG=(defined($arg) ? $arg : 1)             if $opt eq '@';
+
+    $INFILE=$arg                                  if $opt eq 'i';
+    $OUTFILE=$arg                                 if $opt eq 'o';
+    $FORMAT=$arg                                  if $opt eq 'f';
+    $PROGRAM=$arg                                 if $opt eq 'p';
+    $VERBOSE++                                    if $opt eq 'v';
+    $VALIDATE=1                                   if $opt eq 'c';
+
+    shift @ARGV;
+}
+
+###########################################
+# Validate remaining command-line options #
+###########################################
+
+&Usage if @ARGV;
+
+$INFILE  = "-" if $INFILE  eq "";
+$OUTFILE = "-" if $OUTFILE eq "";
+
+die "At least one of -f or -p must be specified.\n"
+   unless $FORMAT || $PROGRAM;
+die "Only one of -f or -p must be specified.\n"
+   if $FORMAT && $PROGRAM;
+
+if ($PROGRAM) {
+   $FORMAT = $PROG_TO_FORMAT{$PROGRAM};
+   die "Cannot find format to use for program '$PROGRAM'.\n"
+       unless $FORMAT;
+}
+
+if (!$FORMAT_TO_PROGS{$FORMAT}) {
+     foreach my $supported (keys %FORMAT_TO_PROGS) {
+         next unless (lc $supported) eq (lc $FORMAT);
+         $FORMAT = $supported;
+         last;
+     }
+}
+
+die "Error: format '$FORMAT' not supported.\n"
+   unless $FORMAT_TO_PROGS{$FORMAT};
+
+################
+# Trap Signals #
+################
+
+sub SigCleanup { # private
+     die "\nExiting: received signal \"" . $_[0] . "\".\n";
+     # Note that some cleanup will be performed in the END block at this point.
+}
+$SIG{'INT'}  = \&SigCleanup;
+$SIG{'TERM'} = \&SigCleanup;
+$SIG{'HUP'}  = \&SigCleanup;
+$SIG{'QUIT'} = \&SigCleanup;
+$SIG{'PIPE'} = \&SigCleanup;
+
+###############################
+#   M A I N   P R O G R A M   #
+###############################
+
+# Read input file. This is a memory hungry slurp.
+my $infh = new IO::File "<$INFILE" 
+    or die "Cannot read from input file '$INFILE': $!\n";
+my @inputtext = <$infh>; # slurp
+$infh->close();
+
+# Guess input format
+my $inFormat = &GuessInputFormat(\@inputtext);
+print STDERR "Your input file seems to be in '$inFormat' format.\n"
+    if $VERBOSE;
+
+# Read the multiple alignments into a standard internal structure.
+my $content = &ParseInput(\@inputtext,$inFormat);
+@inputtext = (); # Zap input array text, free memory
+
+# Validate multiple alignments data (optional, with -c)
+&ValidateMultAligns($content) if $VALIDATE;
+
+# Write them back in the desired output format
+my $outfh = new IO::File ">$OUTFILE"
+    or die "Cannot write to output file '$OUTFILE': $!\n";
+&DumpOutput($outfh,$content,$FORMAT);
+$outfh->close();
+
+exit 0;
+
+#############################
+#   S U B R O U T I N E S   #
+#############################
+
+sub ListKnownFormats {
+    print "-----------------------------------------------------\n";
+    print "List of known formats and the programs which use them\n";
+    print "-----------------------------------------------------\n";
+    print "\n";
+    my @report = ();
+    my $maxf = 0;
+    my $maxd = 0;
+    foreach my $format (sort keys %FORMAT_TO_PROGS) {
+        my $long = $FORMAT_LONG{$format} || "";
+        my $progs = $FORMAT_TO_PROGS{$format};
+        my $proglist = join(", ",sort @$progs);
+        $maxf = length($format) if length($format) > $maxf;
+        $maxd = length($long)   if length($long)   > $maxd;
+        push(@report,[ $format, $long, $proglist ] );
+    }
+    $maxf++; $maxd++;
+    $maxf = 11 if $maxf < 11; # for length of 'Format (-f)'
+    $maxd = 11 if $maxd < 11; # for length of 'Description'
+    printf "%-${maxf}s  %-${maxd}s  %s\n","Format (-f)","Description","Programs (-p)";
+    printf "%-${maxf}s  %-${maxd}s  %s\n","-----------","-----------","-------------";
+    foreach my $line (@report) {
+        my ($format,$long,$proglist) = @$line;
+        printf "%-${maxf}s  %-${maxd}s  %s\n",$format,$long,$proglist;
+    }
+    print "\n";
+}
+
+sub GuessInputFormat {
+    my $text = shift; # array with lines of text from input file, unchomped
+
+    for (my $i=0; $i < @$text;$i++) {
+        my $line = $text->[$i];
+        next if $line =~ m#^\s*$#;
+
+        if ($line =~ m#^>#) {
+            return "FASTA"; # TODO params?
+        }
+
+        if ($line =~ m/^\s*#\s*nexus/i) {
+            return "NEXUS"; # TODO params?
+        }
+
+        if ($line =~ m#^\s*\d+\s+\d+#) {  # found phylip header
+            my $next1 = $text->[$i+1] || "";
+            my $next2 = $text->[$i+2] || "";
+            if ($next1 =~ m#^(\S+)\s+(\S+)# && $next2 =~ m#^(\S+)\s+(\S+)#) {
+                return "Phylip-I"; # TODO params?
+            } else {
+                return "Phylip-N"; # TODO params?
+            }
+        }
+
+        last; # unknown?!?!
+    }
+    
+    return "Unknown";
+}
+
+sub ParseInput {
+    my $text   = shift;
+    my $format = shift;
+
+    my %InputSubroutines = (
+        "FASTA"     => "ReadFastaMultAligns",
+        "Phylip-N"  => "ReadPhylipNMultAligns",
+        "Phylip-I"  => "ReadPhylipIMultAligns",
+        "NEXUS"     => "ReadNexusMultAligns",
+    );
+
+    my $sub = $InputSubroutines{$format}
+        || die "Unsupported input format '$format'.\n";
+
+    no strict 'refs';
+    my $content = &$sub($text);
+    $content;
+}
+
+sub DumpOutput {
+    my $outfh   = shift;
+    my $content = shift;
+    my $format  = shift;
+
+    my %OutputSubroutines = (
+        "FASTA"     => "DumpFastaMultAligns",
+        "Phylip-N"  => "DumpPhylipNMultAligns",
+        "Phylip-I"  => "DumpPhylipIMultAligns",
+        "NEXUS"     => "DumpNexusMultAligns",
+    );
+
+    my $sub = $OutputSubroutines{$format}
+        || die "Unsupported output format '$format'.\n";
+
+    no strict 'refs';
+    &$sub($outfh,$content);
+
+}
+
+sub ValidateMultAligns {
+    my $content = shift;
+
+    if (@$content == 0) {
+        print STDERR "Error: your input file contains NO multiple alignments.\n";
+        return;
+    }
+
+    my %numseqs=();
+    my %seqlens=();
+
+    for (my $i=0;$i<@$content;$i++) {
+        my $ma   = $content->[$i];
+        my $maid = $ma->alignId() || "#$i";
+        my $seqlist = $ma->get_alignedSeqs() || [];
+
+        if (@$seqlist == 0) {
+            print STDERR "Error: the multiple alignment '$maid' contains NO sequences.\n";
+            next;
+        }
+
+        my $numseq = @$seqlist;
+        $numseqs{$numseq}++;
+        my %localseqlens = ();
+        foreach my $seqobj (@$seqlist) {
+            my $id  = $seqobj->seqId()    || "Unknown";
+            my $seq = $seqobj->sequence() || "";
+            my $len = length($seq);
+            $localseqlens{$len}++;
+            $seq =~ tr/~\-ACDEFGHIKLMNPQRSTVWXYacdefghiklmnpqrstvwxy*//d;
+            if ($seq ne "") {
+                 print STDERR "Warning: in alignment '$maid', sequence '$id' contains some weird characters '$seq'.\n";
+            }
+        }
+        if (scalar(keys %localseqlens) > 1) {
+            print "Error: multiple alignment '$maid' contains sequence of different lengths:\n";
+            foreach my $len (sort { $a <=> $b } keys %localseqlens) {
+                print STDERR " -> ",$localseqlens{$len}, " sequences with length $len\n";
+            }
+        }
+
+        while (my ($len,$cnt) = each %localseqlens) {
+            $seqlens{$len} += $cnt;
+        }
+
+    }
+
+    if (scalar(keys %seqlens) > 1) {
+        print "Error: overall, your input file contains sequence of different lengths:\n";
+        foreach my $len (sort { $a <=> $b } keys %seqlens) {
+            print STDERR " -> ",$seqlens{$len}, " sequences with length $len\n";
+        }
+    }
+
+    if (scalar(keys %numseqs) > 1) {
+        print "Error: overall, your input file contains multiple alignments with different number of sequences each:\n";
+        foreach my $num (sort { $a <=> $b } keys %numseqs) {
+            print STDERR " -> ",$numseqs{$num}, " multiple alignments with $num sequences\n";
+        }
+    }
+
+}
+
+
+
+#######################################
+# FASTA input/output
+#######################################
+
+sub ReadFastaMultAligns {
+    my $text = shift;
+
+    my $content = [];
+
+    for (;;) {
+        my @matext = ();
+        my %seenids = ();
+
+        while (@$text) {
+            my $line = shift(@$text);
+            next if $line =~ m#^\s*$|^\s*;#;
+            if ($line =~ m#^>\s*(\S+)#) {
+                my $id = $1;
+                if ($seenids{$id}) {
+                    unshift(@$text,$line);
+                    last;
+                }
+                $seenids{$id}++;
+            }
+            push(@matext,$line);
+        }
+        last unless @matext;
+
+        my $seqlist = [];
+        my $seqobj  = undef;
+        my $seq     = "";
+
+        for (my $i = 0; $i < @matext; $i++) {
+            my $line = $matext[$i];
+            if ($line =~ m#^>(\S+)(\s+.*\S)?\s*$#) {
+                my ($newid,$rest) = ($1,$2);
+                $rest = "" if !defined($rest);
+                if ($seqobj) {
+                    $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                    $seqobj->set_sequence($seq);
+                }
+                $seq="";
+                $seqobj = new PirObject::AlignedSeq(
+                    seqId        => $newid,
+                    seqFastaRest => $rest,
+                    sequence     => "",
+                );
+                push(@$seqlist,$seqobj);
+                next;
+            }
+            $seq .= $line;
+        }
+
+        if ($seqobj) { # handle last seq in file
+             $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+             $seqobj->set_sequence($seq);
+        }
+
+        my $ma = new PirObject::MultAlign(
+            alignedSeqs => $seqlist,
+        );
+
+        push(@$content,$ma);
+    }
+
+    $content;
+}
+
+sub DumpFastaMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {
+        my $seqlist = $ma->get_alignedSeqs() || [];
+        foreach my $seqobj (@$seqlist) {
+            my $text = $seqobj->AsFasta();
+            print $fh $text;
+        }
+    }
+
+}
+
+
+
+#######################################
+# Phylip-N input/output
+#######################################
+
+sub ReadPhylipNMultAligns {
+    my $text = shift;
+
+    my $content = [];
+
+    for (;;) {
+        my @matext = ();
+        shift(@$text) while @$text && $text->[0] =~ m#^\s*$#;
+        my $sizeline = @$text ? shift(@$text) : "";  # size line
+        push(@matext,shift(@$text)) while @$text && $text->[0] !~ m#^\s*\d+\s+\d+#;
+        last unless @matext;
+
+        die "Error: first line of Phylip multiple alignement is incorrect. Expected '<numseq> <seqlength>', got:\n$sizeline\n"
+            unless $sizeline =~ m#^\s*([1-9]\d*)\s+([1-9]\d*)#;
+        my ($numseq,$length) = ($1,$2);
+
+        my $seqlist = [];
+        my $seqobj  = undef;
+        my $seq = "";
+
+        for (my $i=0;$i < @matext;$i++) {
+            my $line = $matext[$i];
+            next if $line =~ m#^\s*$#;
+
+            if (!$seqobj) {
+                die "Can't parse line in Phylip alignment file: Line was:\n$line\n"
+                    unless $line =~ s#^(\S+)\s*##;
+                my $id = $1;
+                $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                $seqobj = new PirObject::AlignedSeq(
+                    seqId    => $id,
+                    sequence => $line,
+                );
+                $seq = $line;
+                push(@$seqlist,$seqobj);
+                $seqobj = undef if length($line) >= $length;
+                next;
+            }
+            $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+            $seq .= $line;
+            $seqobj->set_sequence($seq);
+            $seqobj = undef if length($seq) >= $length;
+        }
+
+        my $ma = new PirObject::MultAlign(
+            alignedSeqs => $seqlist,
+        );
+
+        push(@$content,$ma);
+    }
+
+    $content;
+}
+
+sub DumpPhylipNMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+        print $fh "$numseq\t$seqlen\n";
+        foreach my $seqobj (@$seqlist) {
+            my $text = $seqobj->AsPhylipN();
+            print $fh $text;
+        }
+    }
+}
+
+
+
+#######################################
+# Phylip-I input/output
+#######################################
+
+sub ReadPhylipIMultAligns {
+    my $text = shift;
+
+    my $content = [];
+
+    for (;;) {
+        my @matext = ();
+        shift(@$text) while @$text && $text->[0] =~ m#^\s*$#;
+        my $sizeline = @$text ? shift(@$text) : "";  # size line
+        push(@matext,shift(@$text)) while @$text && $text->[0] !~ m#^\s*\d+\s+\d+#;
+        last unless @matext;
+
+        die "Error: first line of Phylip multiple alignement is incorrect. Expected '<numseq> <seqlength>', got:\n$sizeline\n"
+            unless $sizeline =~ m#^\s*([1-9]\d*)\s+([1-9]\d*)#;
+        my ($numseq,$length) = ($1,$2);
+
+        my $seqlist = [];
+        my $seqobj  = undef;
+        my $seq = "";
+
+        shift(@matext) while @matext && $matext[0] =~ m#^\s*$#;
+        my $reachedlen = 0;
+        while (@matext) {
+            for (my $i=0;$i<$numseq;$i++) {
+                shift(@matext) while @matext && $matext[0] =~ m#^\s*$#;
+                last unless @matext;
+                my $line = shift(@matext);
+                if (!defined($seqlist->[$i])) {
+                    my ($id,$seq) = ($line =~ m#^(\S+)(.*)#);
+                    $line = $seq;
+                    $seqlist->[$i] = PirObject::AlignedSeq->new(
+                        seqId    => $id,
+                        sequence => "",
+                    );
+                }
+                $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                my $seqobj = $seqlist->[$i];
+                my $seq    = $seqobj->get_sequence() || "";
+                $seq .= $line;
+                $seqobj->set_sequence($seq);
+                $reachedlen++ if length($seq) >= $length;
+            }
+            last if $reachedlen; # TODO check that ALL $numseq seqs have reached $length
+        }
+
+        my $ma = new PirObject::MultAlign(
+            alignedSeqs => $seqlist,
+        );
+
+        push(@$content,$ma);
+    }
+
+    $content;
+}
+
+sub DumpPhylipIMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+        print $fh "$numseq\t$seqlen\n";
+        for (my $i=0;$i < $seqlen;$i += 50) {
+            foreach my $seqobj (@$seqlist) {
+                my $seq = $seqobj->get_sequence();
+                my $remain = length($seq) - $i;
+                if ($remain <= 0) { # should never happen
+                    print $fh ((" " x 13),"\n");
+                    next;
+                }
+                my $subseq = substr($seq,$i, $remain < 50 ? $remain : 50);
+                foreach my $space ( 40, 30, 20, 10 ) {
+                    next if $space >= length($subseq);
+                    substr($subseq,$space,0) = " ";
+                }
+                if ($i == 0) {
+                    my $id = $seqobj->get_seqId() || "Unknown";
+                    $id = substr($id,0,10) if length($id) > 10;
+                    $id .= " " while length($id) < 13;
+                    print $fh $id,$subseq,"\n";
+                } else {
+                    print $fh ((" " x 13),$subseq,"\n");
+                }
+            }
+            print $fh "\n";
+        }
+    }
+}
+
+
+
+#######################################
+# NEXUS input/output
+#######################################
+
+sub ReadNexusMultAligns {
+    my $text = shift;
+
+    my $content = [];
+
+    for (;;) {
+        my @matext = ();
+        shift(@$text) while @$text && $text->[0] =~ m#^\s*$#;
+        my $nexusline = @$text ? shift(@$text) : "";  # nexus line
+        push(@matext,shift(@$text)) while @$text && $text->[0] !~ m/\s*#\s*nexus/i;
+        @matext = grep(!m#\s*\[|^\s*$#,@matext);
+        last unless @matext;
+
+        die "Error: expected #NEXUS line, got '$nexusline'.\n"
+            unless $nexusline =~ m/^\s*#\s*nexus/i;
+
+        my ($numseq,$length) = (0,0);
+        while (@matext) {
+            my $line = shift @matext;
+            last if $line =~ m#^\s*matrix#i;
+            next if $line =~ m#begin data#i;
+            if ($line =~ m#dimensions\s+ntax=(\d+)\s+nchar=(\d+)#) {
+                ($numseq,$length) = ($1,$2);
+                next;
+            }
+            if ($line =~ m#^\s*format#) {
+               #format datatype=protein interleave missing=-
+               die "Error: cannot parse NEXUS format that is not interleaved.\n"
+                   unless $line =~ m#\sinterleave#i;
+               # TODO parse other format options?
+               next;
+            }
+            die "Unrecognized NEXUS format line: $line\n";
+        }
+
+        die "Could not found ntax and nchar in NEXUS file?!?\n"
+            unless $numseq > 0 && $length > 0;
+
+        my $seqlist = [];
+        my $seqobj  = undef;
+        my $seq = "";
+
+        my $reachedlen = 0;
+        while (@matext) {
+            for (my $i=0;$i<$numseq;$i++) {
+                shift(@matext) while @matext && $matext[0] =~ m#^\s*$#;
+                last unless @matext;
+                my $line = shift(@matext);
+                my ($id,$seq) = ($line =~ m#^\s*(\S+)(.*)#);
+                if (!defined($seqlist->[$i])) {
+                    $seqlist->[$i] = PirObject::AlignedSeq->new(
+                        seqId    => $id,
+                        sequence => "",
+                    );
+                } else {
+                    my $curid = $seqlist->[$i]->get_seqId();
+                    die "Inconsistency in NEXUS format, got seq line for '$id' expecting one for '$curid'.\n"
+                        unless $curid eq $id;
+                }
+                $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                my $seqobj = $seqlist->[$i];
+                my $curseq = $seqobj->get_sequence() || "";
+                $curseq .= $seq;
+                $seqobj->set_sequence($curseq);
+                $reachedlen++ if length($curseq) >= $length;
+            }
+            last if $reachedlen; # TODO check that ALL $numseq seqs have reached $length
+        }
+
+        my $ma = new PirObject::MultAlign(
+            alignedSeqs => $seqlist,
+        );
+
+        push(@$content,$ma);
+    }
+
+    $content;
+}
+
+sub DumpNexusMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+        my $type    = $ma->GuessType() || "Unknown";
+        print $fh "#NEXUS\n",
+                  "begin data;\n",
+                  " dimensions ntax=$numseq nchar=$seqlen;\n",
+                  " format datatype=$type interleave missing=-;\n",
+                  "  matrix\n";
+
+        for (my $i=0;$i < $seqlen;$i += 100) {
+            foreach my $seqobj (@$seqlist) {
+                my $seq = $seqobj->get_sequence();
+                my $remain = length($seq) - $i;
+                if ($remain <= 0) { # should never happen
+                    print $fh ((" " x 11),"\n");
+                    next;
+                }
+                my $subseq = substr($seq,$i, $remain < 100 ? $remain : 100);
+                foreach my $space ( 80, 60, 40, 20 ) {
+                    next if $space >= length($subseq);
+                    substr($subseq,$space,0) = " ";
+                }
+                my $id = $seqobj->get_seqId() || "Unknown";
+                $id = substr($id,0,9) if length($id) > 9;
+                $id = " $id" while length($id) < 9;
+                print $fh $id,"  ",$subseq,"\n";
+            }
+            print $fh "\n";
+        }
+
+        print $fh ";\n",
+                  "  end;\n";
+
+    }
+}
