@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.1 2006/11/28 16:33:35 riouxp Exp $
+#    $Id: umac,v 1.2 2006/11/29 21:54:43 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.2  2006/11/29 21:54:43  riouxp
+#    Fixed list of progs/formats.
+#
 #    Revision 1.1  2006/11/28 16:33:35  riouxp
 #    Newly checked-in.
 #
@@ -33,7 +36,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.1 2006/11/28 16:33:35 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.2 2006/11/29 21:54:43 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -64,10 +67,9 @@ my %FORMAT_LONG = (
 );
 
 my %PROG_TO_FORMAT = (
-    "RAxML"    => "Phylip-N",
-    "test3"    => "Phylip-N",
-    "test1"    => "Phylip-I",
-    "test2"    => "Phylip-I",
+    "pb"       => "Phylip-N",
+    "RAxMLHPC" => "Phylip-I",
+    "IQPNNI"   => "Phylip-I",
     "jknife"   => "FASTA",
     "paup"     => "NEXUS",
 );
