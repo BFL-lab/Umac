@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.3 2007/02/21 20:55:28 hourlier Exp $
+#    $Id: umac,v 1.4 2007/04/16 16:49:05 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.4  2007/04/16 16:49:05  riouxp
+#    Added support for CLUSTAL format.
+#
 #    Revision 1.3  2007/02/21 20:55:28  hourlier
 #    Added one blank line as an example.
 #
@@ -39,7 +42,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.3 2007/02/21 20:55:28 hourlier Exp $';
+$RCS_VERSION='$Id: umac,v 1.4 2007/04/16 16:49:05 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -68,6 +71,7 @@ my %FORMAT_LONG = (
     "Phylip-I" => "Phylip interleaved",
     "FASTA"    => "FASTA (Pearson)",
     "NEXUS"    => "NEXUS (Paup)",
+    "CLUSTAL"  => "Clustal W (interleaved)",
 );
 
 my %PROG_TO_FORMAT = (
@@ -76,6 +80,7 @@ my %PROG_TO_FORMAT = (
     "IQPNNI"   => "Phylip-I",
     "jknife"   => "FASTA",
     "paup"     => "NEXUS",
+    "clustalw" => "CLUSTAL"
 );
 
 my %FORMAT_TO_PROGS = ();
@@ -249,6 +254,10 @@ sub GuessInputFormat {
         my $line = $text->[$i];
         next if $line =~ m#^\s*$#;
 
+        if ($line =~ m#^CLUSTAL X#) {
+            return "CLUSTAL"; # TODO params?
+        }
+
         if ($line =~ m#^>#) {
             return "FASTA"; # TODO params?
         }
@@ -282,6 +291,7 @@ sub ParseInput {
         "Phylip-N"  => "ReadPhylipNMultAligns",
         "Phylip-I"  => "ReadPhylipIMultAligns",
         "NEXUS"     => "ReadNexusMultAligns",
+        "CLUSTAL"   => "ReadClustalMultAligns",
     );
 
     my $sub = $InputSubroutines{$format}
@@ -302,6 +312,7 @@ sub DumpOutput {
         "Phylip-N"  => "DumpPhylipNMultAligns",
         "Phylip-I"  => "DumpPhylipIMultAligns",
         "NEXUS"     => "DumpNexusMultAligns",
+        "CLUSTAL"   => "DumpClustalMultAligns",
     );
 
     my $sub = $OutputSubroutines{$format}
@@ -758,3 +769,92 @@ sub DumpNexusMultAligns {
 
     }
 }
+
+#######################################
+# CLUSTAL input/output
+#######################################
+
+sub ReadClustalMultAligns {
+    my $text = shift;
+
+    my $content = [];
+
+    for (;;) {
+        my @matext = ();
+        shift(@$text) while @$text && $text->[0] =~ m#^\s*$#;
+        my $headerline = @$text ? shift(@$text) : "";  # constant "CLUSTAL X"
+        push(@matext,shift(@$text)) while @$text && $text->[0] !~ m#^CLUSTAL X#;
+        last unless @matext;
+
+        die "Error: first line of Clustal multiple alignement is incorrect. Expected 'CLUSTAL X', got:\n$headerline\n"
+            unless $headerline =~ m#^CLUSTAL X#;
+        my ($numseq,$length) = (0,0);
+
+        my $seqlist = [];
+        my $seqobj  = undef;
+        my $seq = "";
+
+#Coccidoides.pos               ACACTCGTGCGAGCAATCCACGAACGG-CTG-----------TGGCGCGC
+
+        shift(@matext) while @matext && $matext[0] =~ m#^\s*$#;
+        while (@matext) {
+            for (my $i=0;;$i++) {
+                last unless @matext;
+                last if @matext && $matext[0] =~ m#^\s*$#;
+                my $line = shift(@matext);
+                my ($id,$rest) = ($line =~ m#^(.{30,30})(\S+)#);
+                if (!defined($seqlist->[$i])) {
+                    $id =~ s/\s*$//;
+                    $seqlist->[$i] = PirObject::AlignedSeq->new(
+                        seqId    => $id,
+                        sequence => "",
+                    );
+                }
+                $rest =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                my $seqobj = $seqlist->[$i];
+                my $seq    = $seqobj->get_sequence() || "";
+                $seq .= $rest;
+                $seqobj->set_sequence($seq);
+            }
+            shift(@matext) while @matext && $matext[0] =~ m#^\s*$#
+        }
+
+        my $ma = new PirObject::MultAlign(
+            alignedSeqs => $seqlist,
+        );
+
+        push(@$content,$ma);
+    }
+
+    $content;
+}
+
+sub DumpClustalMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+        print $fh "CLUSTAL X\n\n";
+        for (my $i=0;$i < $seqlen;$i += 50) {
+            print $fh "\n";
+            foreach my $seqobj (@$seqlist) {
+                my $seq = $seqobj->get_sequence();
+                my $remain = length($seq) - $i;
+                if ($remain <= 0) { # should never happen
+                    die "Internal error clustal W\n";
+                }
+                my $subseq = substr($seq,$i, $remain < 50 ? $remain : 50);
+                my $id = $seqobj->get_seqId() || "Unknown";
+                $id = substr($id,0,29) if length($id) > 29;
+                $id .= " " while length($id) < 29;
+                print $fh $id," ",$subseq,"\n";
+            }
+            print $fh "\n";
+        }
+    }
+}
+
+
