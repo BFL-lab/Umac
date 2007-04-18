@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.4 2007/04/16 16:49:05 riouxp Exp $
+#    $Id: umac,v 1.5 2007/04/18 18:24:37 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.5  2007/04/18 18:24:37  riouxp
+#    Added support for GDE format (output only for the moment).
+#
 #    Revision 1.4  2007/04/16 16:49:05  riouxp
 #    Added support for CLUSTAL format.
 #
@@ -42,7 +45,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.4 2007/04/16 16:49:05 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.5 2007/04/18 18:24:37 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -72,6 +75,7 @@ my %FORMAT_LONG = (
     "FASTA"    => "FASTA (Pearson)",
     "NEXUS"    => "NEXUS (Paup)",
     "CLUSTAL"  => "Clustal W (interleaved)",
+    "GDE"      => "GDE",
 );
 
 my %PROG_TO_FORMAT = (
@@ -79,8 +83,10 @@ my %PROG_TO_FORMAT = (
     "RAxMLHPC" => "Phylip-I",
     "IQPNNI"   => "Phylip-I",
     "jknife"   => "FASTA",
+    "phyms"    => "FASTA",
     "paup"     => "NEXUS",
-    "clustalw" => "CLUSTAL"
+    "clustalw" => "CLUSTAL",
+    "gde"      => "GDE",
 );
 
 my %FORMAT_TO_PROGS = ();
@@ -254,6 +260,10 @@ sub GuessInputFormat {
         my $line = $text->[$i];
         next if $line =~ m#^\s*$#;
 
+        if ($line =~ m#^\{\s*$#) {
+            return "GDE";
+        }
+
         if ($line =~ m#^CLUSTAL X#) {
             return "CLUSTAL"; # TODO params?
         }
@@ -313,6 +323,7 @@ sub DumpOutput {
         "Phylip-I"  => "DumpPhylipIMultAligns",
         "NEXUS"     => "DumpNexusMultAligns",
         "CLUSTAL"   => "DumpClustalMultAligns",
+        "GDE"       => "DumpGDEMultAligns",
     );
 
     my $sub = $OutputSubroutines{$format}
@@ -770,6 +781,8 @@ sub DumpNexusMultAligns {
     }
 }
 
+
+
 #######################################
 # CLUSTAL input/output
 #######################################
@@ -858,3 +871,51 @@ sub DumpClustalMultAligns {
 }
 
 
+
+#######################################
+# GDE input/output
+#######################################
+
+sub ReadGDEMultAligns {
+    my $text = shift;
+
+    die "GDE input not supported yet.\n";
+}
+
+sub DumpGDEMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    foreach my $ma (@$content) {  # TODO: cannot differentiate between multiple multaligns
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+
+        foreach my $seqobj (@$seqlist) {
+            my $seq   = $seqobj->get_sequence();
+            my $id    = $seqobj->get_seqId()        || "Unknown";
+            my $rest  = $seqobj->get_seqFastaRest() || "";
+
+            my $seqlet = $seq; $seqlet =~ tr/a-zA-Z//cd;
+            my $acgtn = ($seqlet =~ tr/acgtnACGTN/acgtnACGTN/);
+            my $type  = ($acgtn > .8 * length($seqlet) ? "DNA" : "PROTEIN");
+
+            my $prettyseq = "";
+            $seq =~ tr/~/-/;
+            for (my $i=0;$i < length($seq);$i += 50) {
+                my $len = length($seq) - $i; $len = 50 if $len > 50;
+                $prettyseq .= substr($seq,$i,$len) . "\n";
+            }
+            print $fh <<GDERECORD;
+{
+name        "$id"
+type        "$type"
+descrip     "$rest"
+sequence    "
+$prettyseq
+"
+}
+GDERECORD
+        }
+    }
+}
