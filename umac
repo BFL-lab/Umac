@@ -11,9 +11,13 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.5 2007/04/18 18:24:37 riouxp Exp $
+#    $Id: umac,v 1.6 2007/04/19 19:16:19 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.6  2007/04/19 19:16:19  riouxp
+#    Added option -K to make all non-blank characters significant in
+#    alignments.
+#
 #    Revision 1.5  2007/04/18 18:24:37  riouxp
 #    Added support for GDE format (output only for the moment).
 #
@@ -45,7 +49,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.5 2007/04/18 18:24:37 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.6 2007/04/19 19:16:19 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -59,7 +63,6 @@ my $USER=getpwuid($<) || getlogin || die "Can't find USER from environment!\n";
 $|=1;
 $DEBUG=0;
 
-
 # Arguments from command-line
 my $INFILE="";
 my $OUTFILE="";
@@ -67,6 +70,7 @@ my $FORMAT="";
 my $PROGRAM="";
 my $VERBOSE=0;
 my $VALIDATE=0;
+my $KEEPALLCHARS=0;
 
 # Long decription of each format's short keyword
 my %FORMAT_LONG = (
@@ -103,7 +107,7 @@ foreach my $prog (keys %PROG_TO_FORMAT) {
 sub Usage {
     print "This is $BASENAME $VERSION\n",
           "\n",
-          "Usage: $BASENAME [-@[n]] [-v] [-c] [-f format|-p program] [-i infile] [-o outfile]\n",
+          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-f format|-p program] [-i infile] [-o outfile]\n",
           "\n",
           "   -i is the input file, containing one or many multiple alignments\n",
           "   -o is the output file, converted\n",
@@ -112,6 +116,7 @@ sub Usage {
           "      will use this output; the -f format will be selected for you\n",
           "   -v makes the program more verbose\n",
           "   -c tells the program to check the alignments for errors/inconsistencies\n",
+          "   -K tells the program to allow any and all non blank characters in sequence data\n",
           "\n",
           "Leaving -i and/or -o blank or supplying a single '-' can be used\n",
           "to mean STDIN or STDOUT for the files.\n",
@@ -123,7 +128,7 @@ sub Usage {
 &Usage if @ARGV == 0;
 
 for (;@ARGV;) {
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvc])(.*)$/o);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcK])(.*)$/o);
     last if ! defined $opt;
     if ($opt =~ /[iofp]/ && $arg eq "") {
         if (@ARGV < 2) {
@@ -142,6 +147,7 @@ for (;@ARGV;) {
     $PROGRAM=$arg                                 if $opt eq 'p';
     $VERBOSE++                                    if $opt eq 'v';
     $VALIDATE=1                                   if $opt eq 'c';
+    $KEEPALLCHARS=1                               if $opt eq 'K';
 
     shift @ARGV;
 }
@@ -224,6 +230,16 @@ exit 0;
 #############################
 #   S U B R O U T I N E S   #
 #############################
+
+sub SeqCleanup {
+    my $seqdata = shift;
+    if ($KEEPALLCHARS) {
+        $seqdata =~ s/\s+//g; # just remove blank spaces
+    } else {
+        $seqdata =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+    }
+    $seqdata;
+}
 
 sub ListKnownFormats {
     print "-----------------------------------------------------\n";
@@ -437,7 +453,7 @@ sub ReadFastaMultAligns {
                 my ($newid,$rest) = ($1,$2);
                 $rest = "" if !defined($rest);
                 if ($seqobj) {
-                    $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                    $seq = &SeqCleanup($seq);
                     $seqobj->set_sequence($seq);
                 }
                 $seq="";
@@ -453,7 +469,7 @@ sub ReadFastaMultAligns {
         }
 
         if ($seqobj) { # handle last seq in file
-             $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+             $seq = &SeqCleanup($seq);
              $seqobj->set_sequence($seq);
         }
 
@@ -515,7 +531,7 @@ sub ReadPhylipNMultAligns {
                 die "Can't parse line in Phylip alignment file: Line was:\n$line\n"
                     unless $line =~ s#^(\S+)\s*##;
                 my $id = $1;
-                $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                $line = &SeqCleanup($line);
                 $seqobj = new PirObject::AlignedSeq(
                     seqId    => $id,
                     sequence => $line,
@@ -525,7 +541,7 @@ sub ReadPhylipNMultAligns {
                 $seqobj = undef if length($line) >= $length;
                 next;
             }
-            $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+            $line = &SeqCleanup($line);
             $seq .= $line;
             $seqobj->set_sequence($seq);
             $seqobj = undef if length($seq) >= $length;
@@ -598,7 +614,7 @@ sub ReadPhylipIMultAligns {
                         sequence => "",
                     );
                 }
-                $line =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                $line = &SeqCleanup($line);
                 my $seqobj = $seqlist->[$i];
                 my $seq    = $seqobj->get_sequence() || "";
                 $seq .= $line;
@@ -719,7 +735,7 @@ sub ReadNexusMultAligns {
                     die "Inconsistency in NEXUS format, got seq line for '$id' expecting one for '$curid'.\n"
                         unless $curid eq $id;
                 }
-                $seq =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                $seq = &SeqCleanup($seq);
                 my $seqobj = $seqlist->[$i];
                 my $curseq = $seqobj->get_sequence() || "";
                 $curseq .= $seq;
@@ -823,7 +839,7 @@ sub ReadClustalMultAligns {
                         sequence => "",
                     );
                 }
-                $rest =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+                $rest = &SeqCleanup($rest);
                 my $seqobj = $seqlist->[$i];
                 my $seq    = $seqobj->get_sequence() || "";
                 $seq .= $rest;
@@ -896,7 +912,7 @@ sub DumpGDEMultAligns {
             my $id    = $seqobj->get_seqId()        || "Unknown";
             my $rest  = $seqobj->get_seqFastaRest() || "";
 
-            my $seqlet = $seq; $seqlet =~ tr/a-zA-Z//cd;
+            my $seqlet = $seq; $seqlet =~ tr/a-zA-Z//cd; # not SeqCleanup!
             my $acgtn = ($seqlet =~ tr/acgtnACGTN/acgtnACGTN/);
             my $type  = ($acgtn > .8 * length($seqlet) ? "DNA" : "PROTEIN");
 
@@ -912,8 +928,7 @@ name        "$id"
 type        "$type"
 descrip     "$rest"
 sequence    "
-$prettyseq
-"
+$prettyseq"
 }
 GDERECORD
         }
