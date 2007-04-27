@@ -11,9 +11,13 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.7 2007/04/20 17:02:12 riouxp Exp $
+#    $Id: umac,v 1.8 2007/04/27 18:12:12 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.8  2007/04/27 18:12:12  riouxp
+#    Added preliminary support for Stockholm format (output only)
+#    with a single structure line (#=GC SS_cons).
+#
 #    Revision 1.7  2007/04/20 17:02:12  riouxp
 #    Added RAW format (output only).
 #
@@ -52,7 +56,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.7 2007/04/20 17:02:12 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.8 2007/04/27 18:12:12 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -74,16 +78,18 @@ my $PROGRAM="";
 my $VERBOSE=0;
 my $VALIDATE=0;
 my $KEEPALLCHARS=0;
+my $STRUCTURES=0;
 
 # Long decription of each format's short keyword
 my %FORMAT_LONG = (
-    "Phylip-N" => "Phylip non-interleaved",
-    "Phylip-I" => "Phylip interleaved",
-    "FASTA"    => "FASTA (Pearson)",
-    "NEXUS"    => "NEXUS (Paup)",
-    "CLUSTAL"  => "Clustal W (interleaved)",
-    "GDE"      => "GDE",
-    "RAW"      => "Raw (one line per seq)",
+    "Phylip-N"  => "Phylip non-interleaved",
+    "Phylip-I"  => "Phylip interleaved",
+    "FASTA"     => "FASTA (Pearson)",
+    "NEXUS"     => "NEXUS (Paup)",
+    "CLUSTAL"   => "Clustal W (interleaved)",
+    "GDE"       => "GDE",
+    "RAW"       => "Raw (one line per seq)",
+    "STOCKHOLM" => "Stockholm (interleaved)",
 );
 
 my %PROG_TO_FORMAT = (
@@ -96,6 +102,8 @@ my %PROG_TO_FORMAT = (
     "clustalw" => "CLUSTAL",
     "gde"      => "GDE",
     "RNAfold"  => "RAW",
+    "hmmer"    => "STOCKHOLM",
+    "infernal" => "STOCKHOLM",
 );
 
 my %FORMAT_TO_PROGS = ();
@@ -112,7 +120,7 @@ foreach my $prog (keys %PROG_TO_FORMAT) {
 sub Usage {
     print "This is $BASENAME $VERSION\n",
           "\n",
-          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-f format|-p program] [-i infile] [-o outfile]\n",
+          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile]\n",
           "\n",
           "   -i is the input file, containing one or many multiple alignments\n",
           "   -o is the output file, converted\n",
@@ -122,6 +130,7 @@ sub Usage {
           "   -v makes the program more verbose\n",
           "   -c tells the program to check the alignments for errors/inconsistencies\n",
           "   -K tells the program to allow any and all non blank characters in sequence data\n",
+          "   -S # indicates that the first # sequences are structure descriptions\n",
           "\n",
           "Leaving -i and/or -o blank or supplying a single '-' can be used\n",
           "to mean STDIN or STDOUT for the files.\n",
@@ -133,9 +142,9 @@ sub Usage {
 &Usage if @ARGV == 0;
 
 for (;@ARGV;) {
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcK])(.*)$/o);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcKS])(.*)$/o);
     last if ! defined $opt;
-    if ($opt =~ /[iofp]/ && $arg eq "") {
+    if ($opt =~ /[iofpS]/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for switch \"-$opt\".\n";
             exit 1;
@@ -153,6 +162,7 @@ for (;@ARGV;) {
     $VERBOSE++                                    if $opt eq 'v';
     $VALIDATE=1                                   if $opt eq 'c';
     $KEEPALLCHARS=1                               if $opt eq 'K';
+    $STRUCTURES=$arg                              if $opt eq 'S';
 
     shift @ARGV;
 }
@@ -170,6 +180,8 @@ die "At least one of -f or -p must be specified.\n"
    unless $FORMAT || $PROGRAM;
 die "Only one of -f or -p must be specified.\n"
    if $FORMAT && $PROGRAM;
+die "When supplied, the argument to -S must be a number greater than 0.\n"
+   if $STRUCTURES && $STRUCTURES !~ m#^[1-9]\d*$#;
 
 if ($PROGRAM) {
    $FORMAT = $PROG_TO_FORMAT{$PROGRAM};
@@ -281,6 +293,10 @@ sub GuessInputFormat {
         my $line = $text->[$i];
         next if $line =~ m#^\s*$#;
 
+        if ($line =~ m/^#\s*STOCKHOLM/i) {
+            return "STOCKHOLM";
+        }
+
         if ($line =~ m#^\{\s*$#) {
             return "GDE";
         }
@@ -346,6 +362,7 @@ sub DumpOutput {
         "CLUSTAL"   => "DumpClustalMultAligns",
         "GDE"       => "DumpGDEMultAligns",
         "RAW"       => "DumpRAWMultAligns",
+        "STOCKHOLM" => "DumpStockholmMultAligns",
     );
 
     my $sub = $OutputSubroutines{$format}
@@ -970,4 +987,82 @@ sub DumpRAWMultAligns {
             print $seq,"\n";
         }
     }
+}
+
+
+
+#######################################
+# STOCKHOLM format input/output
+#######################################
+
+sub ReadStockholmMultAligns {
+    my $text = shift;
+
+    die "STOCKHOLM input not supported yet.\n";
+}
+
+sub DumpStockholmMultAligns {
+    my $fh      = shift;
+    my $content = shift;
+
+    my $namelen = 23;
+
+    foreach my $ma (@$content) {
+        my $numseq  = $ma->NumSequences();
+        my $seqlen  = $ma->AlignmentLength();
+        my $seqlist = $ma->get_alignedSeqs() || [];
+
+        # Move 'structure' sequences to the end of the list
+        for (my $c = 0; $c < $STRUCTURES;$c++) {
+            my $structobj = shift @$seqlist;
+            my $seq = &TransformIntoStockholmStruct($structobj->get_sequence());
+            $structobj->set_sequence($seq);
+            push(@$seqlist,$structobj);
+
+        }
+
+        print $fh "# STOCKHOLM 1.0\n";
+
+        for (my $i=0;$i < $seqlen;$i += 50) {
+            print $fh "\n";
+            for (my $s=0; $s < @$seqlist;$s++) {
+                my $seqobj = $seqlist->[$s];
+                my $seq = $seqobj->get_sequence();
+                my $remain = length($seq) - $i;
+                $remain = 0 if ($remain <= 0);
+                my $subseq = substr($seq,$i, $remain < 50 ? $remain : 50);
+                my $id = $seqobj->get_seqId() || "Unknown";
+                $id = substr($id,0,10) if length($id) > $namelen;
+                if ($s+$STRUCTURES >= @$seqlist) {
+                    $id = "#=GC SS_cons"; # actually, there should be only one of these...
+                }
+                $id .= " " while length($id) < $namelen;
+                print $fh $id," ",$subseq,"\n";
+            }
+        }
+
+        print $fh "//\n";
+    }
+}
+
+sub TransformIntoStockholmStruct {
+    my $seq = shift;
+    my %seenUppercasePos=();
+    my @seq = split(m//,$seq);
+    for (my $pos=0;$pos < @seq;$pos++) {
+        my $c = $seq[$pos];
+        if ($c !~ m#^[A-Z]$#) {
+            $seq[$pos]=".";
+            next;
+        }
+        if (!exists($seenUppercasePos{$c})) {
+            $seq[$pos]="<";
+        } elsif ($seenUppercasePos{$c} == $pos-1) {
+            $seq[$pos]=$seq[$pos-1];
+        } else {
+            $seq[$pos]=">";
+        }
+        $seenUppercasePos{$c}=$pos;
+    }
+    join("",@seq);
 }
