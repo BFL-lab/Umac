@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.8 2007/04/27 18:12:12 riouxp Exp $
+#    $Id: umac,v 1.9 2007/04/30 16:37:32 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.9  2007/04/30 16:37:32  riouxp
+#    Added support for #GC RF line in stockholm format.
+#
 #    Revision 1.8  2007/04/27 18:12:12  riouxp
 #    Added preliminary support for Stockholm format (output only)
 #    with a single structure line (#=GC SS_cons).
@@ -56,7 +59,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.8 2007/04/27 18:12:12 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.9 2007/04/30 16:37:32 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -253,7 +256,7 @@ sub SeqCleanup {
     if ($KEEPALLCHARS) {
         $seqdata =~ s/\s+//g; # just remove blank spaces
     } else {
-        $seqdata =~ tr/a-zA-Z\-*~//cd; # MUST KEEP DASHES!
+        $seqdata =~ tr/a-zA-Z\-*~.//cd; # MUST KEEP DASHES!
     }
     $seqdata;
 }
@@ -1006,6 +1009,7 @@ sub DumpStockholmMultAligns {
     my $content = shift;
 
     my $namelen = 23;
+    my $seqlen = 100;
 
     foreach my $ma (@$content) {
         my $numseq  = $ma->NumSequences();
@@ -1015,27 +1019,32 @@ sub DumpStockholmMultAligns {
         # Move 'structure' sequences to the end of the list
         for (my $c = 0; $c < $STRUCTURES;$c++) {
             my $structobj = shift @$seqlist;
-            my $seq = &TransformIntoStockholmStruct($structobj->get_sequence());
+            my $structseq = $structobj->get_sequence() || "";
+
+            my $seq = &TransformIntoStockholmStruct($structseq);
             $structobj->set_sequence($seq);
+            $structobj->set_seqId("#=GC SS_cons");
             push(@$seqlist,$structobj);
 
+            my $maskobj = new PirObject::AlignedSeq(
+                seqId        => "#=GC RF",
+                sequence     => $structseq,  # as is
+            );
+            push(@$seqlist, $maskobj);
         }
 
         print $fh "# STOCKHOLM 1.0\n";
 
-        for (my $i=0;$i < $seqlen;$i += 50) {
+        for (my $i=0;$i < $seqlen;$i += $seqlen) {
             print $fh "\n";
             for (my $s=0; $s < @$seqlist;$s++) {
                 my $seqobj = $seqlist->[$s];
                 my $seq = $seqobj->get_sequence();
                 my $remain = length($seq) - $i;
                 $remain = 0 if ($remain <= 0);
-                my $subseq = substr($seq,$i, $remain < 50 ? $remain : 50);
+                my $subseq = substr($seq,$i, $remain < $seqlen ? $remain : $seqlen);
                 my $id = $seqobj->get_seqId() || "Unknown";
-                $id = substr($id,0,10) if length($id) > $namelen;
-                if ($s+$STRUCTURES >= @$seqlist) {
-                    $id = "#=GC SS_cons"; # actually, there should be only one of these...
-                }
+                $id = substr($id,0,$namelen) if length($id) > $namelen;
                 $id .= " " while length($id) < $namelen;
                 print $fh $id," ",$subseq,"\n";
             }
