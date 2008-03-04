@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.10 2007/04/30 17:07:08 riouxp Exp $
+#    $Id: umac,v 1.11 2008/03/04 18:15:40 riouxp Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.11  2008/03/04 18:15:40  riouxp
+#    Adjusted FASTA parser tomake some blanks non-significant.
+#
 #    Revision 1.10  2007/04/30 17:07:08  riouxp
 #    Fixed output length to 100 in Stockholm format.
 #
@@ -62,7 +65,7 @@ use IO::Dir;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.10 2007/04/30 17:07:08 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.11 2008/03/04 18:15:40 riouxp Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -478,7 +481,7 @@ sub ReadFastaMultAligns {
 
         for (my $i = 0; $i < @matext; $i++) {
             my $line = $matext[$i];
-            if ($line =~ m#^>(\S+)(\s+.*\S)?\s*$#) {
+            if ($line =~ m#^>\s*(\S+)(\s+.*\S)?\s*$#) {
                 my ($newid,$rest) = ($1,$2);
                 $rest = "" if !defined($rest);
                 if ($seqobj) {
