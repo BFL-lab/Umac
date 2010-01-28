@@ -11,11 +11,14 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.11 2008/03/04 18:15:40 riouxp Exp $
+#    $Id: umac,v 1.12 2010/01/28 21:45:47 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.12  2010/01/28 21:45:47  nbeck
+#    Added support for Stockholm input.
+#
 #    Revision 1.11  2008/03/04 18:15:40  riouxp
-#    Adjusted FASTA parser tomake some blanks non-significant.
+#    Adjusted FASTA parser to make some blanks non-significant.
 #
 #    Revision 1.10  2007/04/30 17:07:08  riouxp
 #    Fixed output length to 100 in Stockholm format.
@@ -60,12 +63,13 @@ use vars qw( $VERSION $RCS_VERSION $DEBUG );
 use PirObject qw( MultAlign );
 use IO::File;
 use IO::Dir;
+use File::Path;
 
 # Default umask
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.11 2008/03/04 18:15:40 riouxp Exp $';
+$RCS_VERSION='$Id: umac,v 1.12 2010/01/28 21:45:47 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -84,10 +88,14 @@ my $INFILE="";
 my $OUTFILE="";
 my $FORMAT="";
 my $PROGRAM="";
+my $TMPDIR="";
 my $VERBOSE=0;
 my $VALIDATE=0;
 my $KEEPALLCHARS=0;
 my $STRUCTURES=0;
+my $FILTERING=1;
+my $GLOBALPERCENT=0;
+my $LOCALPERCENT=0;
 
 # Long decription of each format's short keyword
 my %FORMAT_LONG = (
@@ -122,6 +130,12 @@ foreach my $prog (keys %PROG_TO_FORMAT) {
     push(@{$FORMAT_TO_PROGS{$format}},$prog);
 }
 
+# CREATE THE TMPDIR #
+$TMPDIR = "/tmp/umac.$$" if !$TMPDIR;
+if (! -d $TMPDIR) {
+    mkdir($TMPDIR,0700) or die "Error: can't create work directory '$TMPDIR': $!\n";
+}
+
 #####################################
 # Command-Line Arguments Processing #
 #####################################
@@ -129,7 +143,7 @@ foreach my $prog (keys %PROG_TO_FORMAT) {
 sub Usage {
     print "This is $BASENAME $VERSION\n",
           "\n",
-          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile]\n",
+          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent]\n",
           "\n",
           "   -i is the input file, containing one or many multiple alignments\n",
           "   -o is the output file, converted\n",
@@ -140,6 +154,9 @@ sub Usage {
           "   -c tells the program to check the alignments for errors/inconsistencies\n",
           "   -K tells the program to allow any and all non blank characters in sequence data\n",
           "   -S # indicates that the first # sequences are structure descriptions\n",
+          "   -F use filter for STOCKHOLM\n",
+          "   -g retain sequence columns that are of value defined in g (*,9,8...;  #=GC PP_cons)\n",
+          "   -s replace sequences for every species that are worse than the value defined\n",
           "\n",
           "Leaving -i and/or -o blank or supplying a single '-' can be used\n",
           "to mean STDIN or STDOUT for the files.\n",
@@ -151,9 +168,9 @@ sub Usage {
 &Usage if @ARGV == 0;
 
 for (;@ARGV;) {
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcKS])(.*)$/o);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcKSFgs])(.*)$/o);
     last if ! defined $opt;
-    if ($opt =~ /[iofpS]/ && $arg eq "") {
+    if ($opt =~ /[iofpSgs]/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for switch \"-$opt\".\n";
             exit 1;
@@ -172,9 +189,18 @@ for (;@ARGV;) {
     $VALIDATE=1                                   if $opt eq 'c';
     $KEEPALLCHARS=1                               if $opt eq 'K';
     $STRUCTURES=$arg                              if $opt eq 'S';
+    $FILTERING=1                                  if $opt eq 'F';
+    $GLOBALPERCENT=$arg                           if $opt eq 'g';
+    $LOCALPERCENT=$arg                            if $opt eq 's';
 
     shift @ARGV;
 }
+
+die "-g value must be under 0 and 9 or * for 10 and . for 0\n"
+   if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "." || $GLOBALPERCENT =~ m/^\d+$/ && $GLOBALPERCENT < 10 && $GLOBALPERCENT > 0);
+   
+die "-s value must be under 0 and 9 or * for 10 and . for 0\n" 
+   if !($LOCALPERCENT eq "*" || $LOCALPERCENT eq "." || $LOCALPERCENT =~ m/^\d+$/ && $LOCALPERCENT < 10 && $LOCALPERCENT > 0);
 
 ###########################################
 # Validate remaining command-line options #
@@ -252,6 +278,14 @@ my $outfh = new IO::File ">$OUTFILE"
 $outfh->close();
 
 exit 0;
+
+
+END { 
+    # With exit, programme will go here
+    # Cleanup temp directory when program exits.
+    return unless defined($TMPDIR) and $TMPDIR =~ m#^/tmp/#;
+    rmtree($TMPDIR);
+}
 
 #############################
 #   S U B R O U T I N E S   #
@@ -348,6 +382,7 @@ sub ParseInput {
         "Phylip-I"  => "ReadPhylipIMultAligns",
         "NEXUS"     => "ReadNexusMultAligns",
         "CLUSTAL"   => "ReadClustalMultAligns",
+        "STOCKHOLM" => "ReadStockholmMultAligns",
     );
 
     my $sub = $InputSubroutines{$format}
@@ -1005,9 +1040,144 @@ sub DumpRAWMultAligns {
 #######################################
 
 sub ReadStockholmMultAligns {
-    my $text = shift;
+    my $content = [];
 
-    die "STOCKHOLM input not supported yet.\n";
+    #run esl-alimanip in order to format infile
+    my ($eslOut,$eslErr) = ("$TMPDIR/eslOut","$TMPDIR/eslErr");
+    my $cmd = "esl-alimanip -o $TMPDIR/out.ali -1 $INFILE";
+    print STDERR $cmd if $DEBUG;
+  	my $ret = system("$cmd > $eslOut 2> $eslErr");
+	
+	if (($ret >> 8) > 1) {
+	    print STDERR "There was an error running esl-alimanip.\n";
+		print STDERR "Content of STDERR output:\n";
+		system("cat",$eslErr);
+	}
+    
+    # Read input file. This is a memory hungry slurp.
+    my $alifh = new IO::File "<$TMPDIR/out.ali" 
+        or die "Cannot read from input file '$TMPDIR/out.ali': $!\n";
+    my $text = [<$alifh>]; # slurp
+    $alifh->close();
+
+    #Treatment
+    my %seenids = ();
+    my $seqlist = [];
+    my $seqobj  = undef;
+
+    my ($query_name,$count) = ("",0);
+    my ($PP_cons,$RF) = ("","");
+    my $info = {};
+    while (@$text) {
+        my $line = shift(@$text);
+        next if $line =~ m/^\s+$/;
+        if ($line =~ m/^#/) {
+            $query_name = $1 if $line =~ m/#=GF\s*ID\s*(.+)/;
+            next if $line !~ m/#=GR|#=GC/;
+        }
+        
+        if ($line =~ m/#=GR\s*/) {
+            my @split = split(/\s+/, $line);
+            my $id    = $1 if $split[1] =~ m/(.+)\//;
+            my $PP    = $split[-1];
+            $info->{$id}->{$seenids{$id}}->{PP} = $PP;
+        }
+        elsif ($line =~ m/#=GC\s*/) {
+            my @split = split(/\s+/, $line);
+            $PP_cons = $split[-1] if $line =~ m/PP_cons/;
+            $RF      = $split[-1] if $line =~ m/RF/;
+        }
+        elsif ($line =~ m/(.+)\/\d+-\d+\s+(.+)/) {
+            #next if $line !~ m/(.+)\/\d+-\d+\s+(.+)/;
+            my ($id,$seq) = ($1,$2);
+            $seenids{$id}++;
+            $info->{$id}->{$seenids{$id}}->{seq} = $seq;
+        }
+        else {
+            next if $line =~ m/\/\//;
+            $count++;
+        }
+    }
+    
+    die "More than 1 sequence have no PP\n" if $count > 1;
+    
+    for my $id ( keys %$info ) {
+        my $info_for_id = $info->{$id};
+        my $nb_dupli    = scalar( keys %$info_for_id);
+
+        for my $num_dupli ( keys %$info_for_id ) {
+            my $info_for_dupli = $info_for_id->{$num_dupli};
+            my $id  = $nb_dupli == 1 ? $id : "${id}_${num_dupli}";
+            my $seq = $info_for_dupli->{seq};
+            my $PP  = $info_for_dupli->{PP};
+            $seqobj = new PirObject::AlignedSeq(
+                seqId        => $id,
+                sequence     => $seq,
+                PP           => $PP,
+            );
+            push(@$seqlist,$seqobj);
+        }
+    }
+            
+    my $ma = new PirObject::MultAlign(
+        alignedSeqs => $seqlist,
+        PP_cons     => $PP_cons,
+    );
+    push(@$content,$ma);
+    
+    &FilteringStockholm($ma);
+    
+    $content;
+
+}
+
+sub FilteringStockholm {
+    my $ma = shift;
+    
+    my $PP_cons     = $ma->get_PP_cons();
+    die "Can't use option -F no line 'PP_cons' found in $INFILE\n" 
+        if $PP_cons eq "" && $FILTERING == 1;
+    my $alignedSeqs = $ma->get_alignedSeqs();
+
+    #Make array with pos to remove use GLOBALPERCENT
+    my $GlobalPercent = $GLOBALPERCENT;
+       $GlobalPercent = 10 if $GLOBALPERCENT eq "*";
+       $GlobalPercent = 0  if $GLOBALPERCENT eq ".";
+    my @aPP_cons = split(//,$PP_cons);
+    my $columnToRemove = ();
+    
+    for ( my $i = 0 ; $i < @aPP_cons ; $i++) {
+        my $PP_val = $aPP_cons[$i];
+        $PP_val =  0 if $PP_val eq ".";
+        $PP_val = 10 if $PP_val eq "*";
+        push(@$columnToRemove,$i) if $PP_val < $GlobalPercent;
+    }
+    
+    #Treat each Seq with LOCALPERCENT and GLOBALPERCENT
+    foreach my $alignedSeq (@$alignedSeqs) {
+        my $PP  = $alignedSeq->get_PP();
+        my $Seq = $alignedSeq->get_sequence();
+        
+        #Treat LOCALPERCENT
+        my $LocalPercent = $LOCALPERCENT;
+           $LocalPercent = 10 if $LOCALPERCENT eq "*";
+           $LocalPercent = 0  if $LOCALPERCENT eq ".";
+        my @aPP  = split(//,$PP);
+        my @aSeq = split(//,$Seq);
+        for ( my $i = 0 ; $i < @aPP_cons ; $i++) {
+            my $PP_val = $aPP[$i];
+            $PP_val =  0 if $PP_val eq ".";
+            $PP_val = 10 if $PP_val eq "*";
+            $aSeq[$i] = "-" if $PP_val < $LocalPercent;
+        }
+        
+        #Treat GLOBALPERCENT
+        for (my $i = @aSeq - 1; $i >= 0 ; $i--) {
+            splice(@aSeq, $i, 1) if grep($_ == $i, @$columnToRemove);
+        }
+        $Seq = join('',@aSeq);
+        $alignedSeq->set_sequence($Seq);
+    }
 }
 
 sub DumpStockholmMultAligns {
