@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.14 2010/01/29 16:46:17 nbeck Exp $
+#    $Id: umac,v 1.15 2010/01/29 18:48:09 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.15  2010/01/29 18:48:09  nbeck
+#    Change path for esl-alimanip.
+#
 #    Revision 1.14  2010/01/29 16:46:17  nbeck
 #    Fixed bug when reading STOCKHOLM.
 #
@@ -75,7 +78,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.14 2010/01/29 16:46:17 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.15 2010/01/29 18:48:09 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1050,7 +1053,7 @@ sub ReadStockholmMultAligns {
 
     #run esl-alimanip in order to format infile
     my ($eslOut,$eslErr) = ("$TMPDIR/eslOut","$TMPDIR/eslErr");
-    my $cmd = "esl-alimanip -o $TMPDIR/out.ali -1 $INFILE";
+    my $cmd = "esl-alimanip-amd -o $TMPDIR/out.ali -1 $INFILE";
     print STDERR $cmd if $DEBUG;
   	my $ret = system("$cmd > $eslOut 2> $eslErr");
 	
