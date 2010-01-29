@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.12 2010/01/28 21:45:47 nbeck Exp $
+#    $Id: umac,v 1.13 2010/01/29 15:09:03 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.13  2010/01/29 15:09:03  nbeck
+#    Fixed bug for filtering option.
+#
 #    Revision 1.12  2010/01/28 21:45:47  nbeck
 #    Added support for Stockholm input.
 #
@@ -69,7 +72,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.12 2010/01/28 21:45:47 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.13 2010/01/29 15:09:03 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -197,10 +200,10 @@ for (;@ARGV;) {
 }
 
 die "-g value must be under 0 and 9 or * for 10 and . for 0\n"
-   if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "." || $GLOBALPERCENT =~ m/^\d+$/ && $GLOBALPERCENT < 10 && $GLOBALPERCENT > 0);
+   if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "." || $GLOBALPERCENT =~ m/^\d+$/ && $GLOBALPERCENT < 10 && $GLOBALPERCENT >= 0);
    
 die "-s value must be under 0 and 9 or * for 10 and . for 0\n" 
-   if !($LOCALPERCENT eq "*" || $LOCALPERCENT eq "." || $LOCALPERCENT =~ m/^\d+$/ && $LOCALPERCENT < 10 && $LOCALPERCENT > 0);
+   if !($LOCALPERCENT eq "*" || $LOCALPERCENT eq "." || $LOCALPERCENT =~ m/^\d+$/ && $LOCALPERCENT < 10 && $LOCALPERCENT >= 0);
 
 ###########################################
 # Validate remaining command-line options #
@@ -1107,7 +1110,7 @@ sub ReadStockholmMultAligns {
 
         for my $num_dupli ( keys %$info_for_id ) {
             my $info_for_dupli = $info_for_id->{$num_dupli};
-            my $id  = $nb_dupli == 1 ? $id : "${id}_${num_dupli}";
+            my $id  = $nb_dupli == 1 ? $id : "${num_dupli}${id}";
             my $seq = $info_for_dupli->{seq};
             my $PP  = $info_for_dupli->{PP};
             $seqobj = new PirObject::AlignedSeq(
