@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.13 2010/01/29 15:09:03 nbeck Exp $
+#    $Id: umac,v 1.14 2010/01/29 16:46:17 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.14  2010/01/29 16:46:17  nbeck
+#    Fixed bug when reading STOCKHOLM.
+#
 #    Revision 1.13  2010/01/29 15:09:03  nbeck
 #    Fixed bug for filtering option.
 #
@@ -72,7 +75,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.13 2010/01/29 15:09:03 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.14 2010/01/29 16:46:17 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1068,7 +1071,7 @@ sub ReadStockholmMultAligns {
     my $seqlist = [];
     my $seqobj  = undef;
 
-    my ($query_name,$count) = ("",0);
+    my ($query_name,$prev_line) = ("","");
     my ($PP_cons,$RF) = ("","");
     my $info = {};
     while (@$text) {
@@ -1080,29 +1083,25 @@ sub ReadStockholmMultAligns {
         }
         
         if ($line =~ m/#=GR\s*/) {
-            my @split = split(/\s+/, $line);
-            my $id    = $1 if $split[1] =~ m/(.+)\//;
-            my $PP    = $split[-1];
-            $info->{$id}->{$seenids{$id}}->{PP} = $PP;
+            my @split_line = split(/\s+/, $line);
+            my @split_prev = split(/\s+/, $prev_line);
+            
+            if ($split_prev[0] eq $split_line[1]) { 
+                my $id    = $split_line[1] =~ m/(.+)\// ? $1 : $split_line[1];
+                $seenids{$id}++;
+                my $seq   = $split_prev[1];
+                $info->{$id}->{$seenids{$id}}->{seq} = $seq;
+                my $PP    = $split_line[-1];
+                $info->{$id}->{$seenids{$id}}->{PP} = $PP;
+            }
         }
         elsif ($line =~ m/#=GC\s*/) {
             my @split = split(/\s+/, $line);
             $PP_cons = $split[-1] if $line =~ m/PP_cons/;
             $RF      = $split[-1] if $line =~ m/RF/;
         }
-        elsif ($line =~ m/(.+)\/\d+-\d+\s+(.+)/) {
-            #next if $line !~ m/(.+)\/\d+-\d+\s+(.+)/;
-            my ($id,$seq) = ($1,$2);
-            $seenids{$id}++;
-            $info->{$id}->{$seenids{$id}}->{seq} = $seq;
-        }
-        else {
-            next if $line =~ m/\/\//;
-            $count++;
-        }
+        $prev_line = $line;
     }
-    
-    die "More than 1 sequence have no PP\n" if $count > 1;
     
     for my $id ( keys %$info ) {
         my $info_for_id = $info->{$id};
