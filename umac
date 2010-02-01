@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.15 2010/01/29 18:48:09 nbeck Exp $
+#    $Id: umac,v 1.16 2010/02/01 20:42:17 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.16  2010/02/01 20:42:17  nbeck
+#    Optimization of sub FilteringStockholm.
+#
 #    Revision 1.15  2010/01/29 18:48:09  nbeck
 #    Change path for esl-alimanip.
 #
@@ -78,7 +81,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.15 2010/01/29 18:48:09 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.16 2010/02/01 20:42:17 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1123,6 +1126,8 @@ sub ReadStockholmMultAligns {
             push(@$seqlist,$seqobj);
         }
     }
+    
+    $text = []; # Zap input array text, free memory
             
     my $ma = new PirObject::MultAlign(
         alignedSeqs => $seqlist,
@@ -1148,41 +1153,33 @@ sub FilteringStockholm {
     my $GlobalPercent = $GLOBALPERCENT;
        $GlobalPercent = 10 if $GLOBALPERCENT eq "*";
        $GlobalPercent = 0  if $GLOBALPERCENT eq ".";
-    my @aPP_cons = split(//,$PP_cons);
+       
     my $columnToRemove = ();
-    
-    for ( my $i = 0 ; $i < @aPP_cons ; $i++) {
-        my $PP_val = $aPP_cons[$i];
-        $PP_val =  0 if $PP_val eq ".";
-        $PP_val = 10 if $PP_val eq "*";
+    for ( my $i = 0 ; $i < length($PP_cons) ; $i++) {
+        my $PP_val = substr($PP_cons,$i,1);
+        $PP_val    =  0 if $PP_val eq ".";
+        $PP_val    = 10 if $PP_val eq "*";
         push(@$columnToRemove,$i) if $PP_val < $GlobalPercent;
     }
     
     #Treat each Seq with LOCALPERCENT and GLOBALPERCENT
+    my $LocalPercent = $LOCALPERCENT;
+       $LocalPercent = 10 if $LOCALPERCENT eq "*";
+       $LocalPercent = 0  if $LOCALPERCENT eq ".";
+    my %cols_to_remove = map { $_ => 1 } @$columnToRemove;
     foreach my $alignedSeq (@$alignedSeqs) {
         my $PP  = $alignedSeq->get_PP();
         my $Seq = $alignedSeq->get_sequence();
-        
         #Treat LOCALPERCENT
-        my $LocalPercent = $LOCALPERCENT;
-           $LocalPercent = 10 if $LOCALPERCENT eq "*";
-           $LocalPercent = 0  if $LOCALPERCENT eq ".";
-        my @aPP  = split(//,$PP);
-        my @aSeq = split(//,$Seq);
-        for ( my $i = 0 ; $i < @aPP_cons ; $i++) {
-            my $PP_val = $aPP[$i];
-            $PP_val =  0 if $PP_val eq ".";
-            $PP_val = 10 if $PP_val eq "*";
-            $aSeq[$i] = "-" if $PP_val < $LocalPercent;
+        for (my $i = length($Seq) - 1; $i >= 0 ; $i--) {
+            my $PP_val = substr($PP,$i,1);
+            $PP_val    =  0  if $PP_val eq ".";
+            $PP_val    = 10  if $PP_val eq "*";
+            substr($Seq,$i,1) = "-" if $PP_val < $LocalPercent;
+            substr($Seq,$i,1) = ""  if $cols_to_remove{$i};
         }
-        
-        #Treat GLOBALPERCENT
-        for (my $i = @aSeq - 1; $i >= 0 ; $i--) {
-            splice(@aSeq, $i, 1) if grep($_ == $i, @$columnToRemove);
-        }
-        $Seq = join('',@aSeq);
         $alignedSeq->set_sequence($Seq);
-    }
+    }    
 }
 
 sub DumpStockholmMultAligns {
