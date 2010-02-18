@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.16 2010/02/01 20:42:17 nbeck Exp $
+#    $Id: umac,v 1.17 2010/02/18 21:42:16 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.17  2010/02/18 21:42:16  nbeck
+#    Changed ReadStockholmMultAligns in order to fix some bug.
+#
 #    Revision 1.16  2010/02/01 20:42:17  nbeck
 #    Optimization of sub FilteringStockholm.
 #
@@ -81,7 +84,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.16 2010/02/01 20:42:17 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.17 2010/02/18 21:42:16 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -105,7 +108,7 @@ my $VERBOSE=0;
 my $VALIDATE=0;
 my $KEEPALLCHARS=0;
 my $STRUCTURES=0;
-my $FILTERING=1;
+my $FILTERING=0;
 my $GLOBALPERCENT=0;
 my $LOCALPERCENT=0;
 
@@ -1053,60 +1056,82 @@ sub DumpRAWMultAligns {
 
 sub ReadStockholmMultAligns {
     my $content = [];
-
-    #run esl-alimanip in order to format infile
-    my ($eslOut,$eslErr) = ("$TMPDIR/eslOut","$TMPDIR/eslErr");
-    my $cmd = "esl-alimanip-amd -o $TMPDIR/out.ali -1 $INFILE";
-    print STDERR $cmd if $DEBUG;
-  	my $ret = system("$cmd > $eslOut 2> $eslErr");
-	
-	if (($ret >> 8) > 1) {
-	    print STDERR "There was an error running esl-alimanip.\n";
-		print STDERR "Content of STDERR output:\n";
-		system("cat",$eslErr);
-	}
     
     # Read input file. This is a memory hungry slurp.
-    my $alifh = new IO::File "<$TMPDIR/out.ali" 
-        or die "Cannot read from input file '$TMPDIR/out.ali': $!\n";
+    my $alifh = new IO::File "<$INFILE" 
+        or die "Cannot read from input file '$INFILE': $!\n";
     my $text = [<$alifh>]; # slurp
     $alifh->close();
-
-    #Treatment
-    my %seenids = ();
-    my $seqlist = [];
-    my $seqobj  = undef;
-
-    my ($query_name,$prev_line) = ("","");
-    my ($PP_cons,$RF) = ("","");
-    my $info = {};
+    
+    # Separate all block 
+    my $each_block = {};
+    my $block      = ();
+    my $i          = 0;
     while (@$text) {
         my $line = shift(@$text);
-        next if $line =~ m/^\s+$/;
-        if ($line =~ m/^#/) {
-            $query_name = $1 if $line =~ m/#=GF\s*ID\s*(.+)/;
-            next if $line !~ m/#=GR|#=GC/;
+        if ($line !~ m/^\n$/) {
+            push(@$block,$line);
         }
-        
-        if ($line =~ m/#=GR\s*/) {
-            my @split_line = split(/\s+/, $line);
-            my @split_prev = split(/\s+/, $prev_line);
-            
-            if ($split_prev[0] eq $split_line[1]) { 
-                my $id    = $split_line[1] =~ m/(.+)\// ? $1 : $split_line[1];
-                $seenids{$id}++;
-                my $seq   = $split_prev[1];
-                $info->{$id}->{$seenids{$id}}->{seq} = $seq;
-                my $PP    = $split_line[-1];
-                $info->{$id}->{$seenids{$id}}->{PP} = $PP;
+        else {
+            $each_block->{$i} = $block;
+            $block = ();
+            $i++;
+        }
+    }
+    
+    # Treat block by block.
+    my %global_seenids    = ();
+    my $nb_block_with_seq = 0;
+    my $info              = {};
+    my $seqlist           = [];
+    my $seqobj            = undef;
+    my ($PP_cons,$RF)     = ("","");
+    
+    foreach my $key (sort (keys(%$each_block))) {
+        $block  = $each_block->{$key};
+        my $nb_seq = 0;
+        my %seenids = ();
+        for (my $i = 0; $i < @$block; $i++) {
+            my $line = $block->[$i];
+            #Treat #=GC
+            if ($line =~ m/#=GC\s*/) {
+                my @split = split(/\s+/, $line);
+                $PP_cons .= $split[-1] if $line =~ m/PP_cons/;
+                $RF      .= $split[-1] if $line =~ m/RF/;
             }
+            
+            # Treat sequence 
+            next if $line =~ m/^#/;
+            my @split_line  = split(/\s+/, $line);
+            my ($name,$seq) = @split_line;
+            my $id = $name && $name =~ m/(.+)\// ? $1 : $name;
+            $nb_seq++;
+            $seenids{$id}++;
+            $global_seenids{$id}++;
+            
+            my $begin_seq = $info->{$id}->{$seenids{$id}}->{seq};
+            $seq = defined($begin_seq) ? "${begin_seq}$seq": $seq;
+            $info->{$id}->{$seenids{$id}}->{seq} = $seq;
+
+            # Treat #GR if next $line =~ m/^#=GR/
+            my $next_line       = $block->[$i+1];
+            next if !$next_line;
+            next if $next_line  !~ m/^#=GR/;
+            my @split_next_line = split(/\s+/, $next_line);
+            my ($tag,$name_next,$feat,$mark)  = @split_next_line;
+            # my $id_next = $name_next && $name_next =~ m/(.+)\// ? $1 : $name_next;
+            # print "$name does"
+            next if $feat ne "PP";
+            my $begin_PP = $info->{$id}->{$seenids{$id}}->{PP};
+            my $PP = defined($begin_PP) ? "${begin_PP}$mark": $mark;
+            $info->{$id}->{$seenids{$id}}->{PP} = $PP;
         }
-        elsif ($line =~ m/#=GC\s*/) {
-            my @split = split(/\s+/, $line);
-            $PP_cons = $split[-1] if $line =~ m/PP_cons/;
-            $RF      = $split[-1] if $line =~ m/RF/;
-        }
-        $prev_line = $line;
+        $nb_block_with_seq++ if $nb_seq != 0;
+    }
+
+    while ( my ($id, $value) = each(%global_seenids) ) { 
+          my $mod   = $value % $nb_block_with_seq;
+          print "Sequence $id not present in all block\n" if $mod != 0;
     }
     
     for my $id ( keys %$info ) {
@@ -1135,10 +1160,9 @@ sub ReadStockholmMultAligns {
     );
     push(@$content,$ma);
     
-    &FilteringStockholm($ma);
+    &FilteringStockholm($ma) if $FILTERING == 1;
     
-    $content;
-
+    return $content;
 }
 
 sub FilteringStockholm {
@@ -1146,7 +1170,7 @@ sub FilteringStockholm {
     
     my $PP_cons     = $ma->get_PP_cons();
     die "Can't use option -F no line 'PP_cons' found in $INFILE\n" 
-        if $PP_cons eq "" && $FILTERING == 1;
+        if $PP_cons eq "";
     my $alignedSeqs = $ma->get_alignedSeqs();
 
     #Make array with pos to remove use GLOBALPERCENT
