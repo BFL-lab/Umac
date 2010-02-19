@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.18 2010/02/19 22:31:51 nbeck Exp $
+#    $Id: umac,v 1.19 2010/02/19 23:16:43 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.19  2010/02/19 23:16:43  nbeck
+#    Added option -n and added verification for STOCKHOLM format.
+#
 #    Revision 1.18  2010/02/19 22:31:51  nbeck
 #    Fixed bug about last STOCKHOLM block.
 #
@@ -87,7 +90,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.18 2010/02/19 22:31:51 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.19 2010/02/19 23:16:43 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -112,8 +115,9 @@ my $VALIDATE=0;
 my $KEEPALLCHARS=0;
 my $STRUCTURES=0;
 my $FILTERING=0;
-my $GLOBALPERCENT=0;
-my $LOCALPERCENT=0;
+my $GLOBALPERCENT='*';
+my $LOCALPERCENT='*';
+my $DASHPERCENT=70;
 
 # Long decription of each format's short keyword
 my %FORMAT_LONG = (
@@ -161,7 +165,7 @@ if (! -d $TMPDIR) {
 sub Usage {
     print "This is $BASENAME $VERSION\n",
           "\n",
-          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent]\n",
+          "Usage: $BASENAME [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent -n nt_percent]\n",
           "\n",
           "   -i is the input file, containing one or many multiple alignments\n",
           "   -o is the output file, converted\n",
@@ -172,9 +176,10 @@ sub Usage {
           "   -c tells the program to check the alignments for errors/inconsistencies\n",
           "   -K tells the program to allow any and all non blank characters in sequence data\n",
           "   -S # indicates that the first # sequences are structure descriptions\n",
-          "   -F use filter for STOCKHOLM\n",
-          "   -g retain sequence columns that are of value defined in g (*,9,8...;  #=GC PP_cons)\n",
-          "   -s replace sequences for every species that are worse than the value defined\n",
+          "   -F use filter for STOCKHOLM if only -F is defined used default value for -g, -n, -s\n",
+          "   -g retain sequence columns that are of value defined in g (*,9,8...;  #=GC PP_cons default: '*')\n",
+          "   -n retain sequence columns with a percentage of sequence characters larger than or equal as defined in n (default: 70% retain)\n",
+          "   -s replace sequences for every species that are worse than the value defined default: '*'\n",
           "\n",
           "Leaving -i and/or -o blank or supplying a single '-' can be used\n",
           "to mean STDIN or STDOUT for the files.\n",
@@ -186,9 +191,9 @@ sub Usage {
 &Usage if @ARGV == 0;
 
 for (;@ARGV;) {
-    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcKSFgs])(.*)$/o);
+    my ($opt,$arg) = ($ARGV[0] =~ /^-([\@iofpvcnKSFgs])(.*)$/o);
     last if ! defined $opt;
-    if ($opt =~ /[iofpSgs]/ && $arg eq "") {
+    if ($opt =~ /[iofpnSgs]/ && $arg eq "") {
         if (@ARGV < 2) {
             print "Argument required for switch \"-$opt\".\n";
             exit 1;
@@ -210,16 +215,25 @@ for (;@ARGV;) {
     $FILTERING=1                                  if $opt eq 'F';
     $GLOBALPERCENT=$arg                           if $opt eq 'g';
     $LOCALPERCENT=$arg                            if $opt eq 's';
+    $DASHPERCENT=$arg                             if $opt eq 'n';
 
     shift @ARGV;
 }
 
+die "Must add -F option if you want use -g or -s or -p\n"
+    if $FILTERING == 0 && ( $GLOBALPERCENT != -1 || $LOCALPERCENT != -1 || $DASHPERCENT !=- 1 );
+
 die "-g value must be under 0 and 9 or * for 10 and . for 0\n"
-   if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "." || $GLOBALPERCENT =~ m/^\d+$/ && $GLOBALPERCENT < 10 && $GLOBALPERCENT >= 0);
+   if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "."
+     || $GLOBALPERCENT =~ m/^\d+$/ && $GLOBALPERCENT < 10 && $GLOBALPERCENT >= 0 );
    
 die "-s value must be under 0 and 9 or * for 10 and . for 0\n" 
-   if !($LOCALPERCENT eq "*" || $LOCALPERCENT eq "." || $LOCALPERCENT =~ m/^\d+$/ && $LOCALPERCENT < 10 && $LOCALPERCENT >= 0);
+   if !($LOCALPERCENT eq "*" || $LOCALPERCENT eq "."
+     || $LOCALPERCENT =~ m/^\d+$/ && $LOCALPERCENT < 10 && $LOCALPERCENT >= 0);
 
+die "-d value must be under 0 and 100\n" 
+   if !( $DASHPERCENT !~ m/^\d+$/ || $DASHPERCENT <= 100 && $DASHPERCENT >= 0);
+     
 ###########################################
 # Validate remaining command-line options #
 ###########################################
@@ -1051,8 +1065,6 @@ sub DumpRAWMultAligns {
     }
 }
 
-
-
 #######################################
 # STOCKHOLM format input/output
 #######################################
@@ -1123,8 +1135,8 @@ sub ReadStockholmMultAligns {
             next if $next_line  !~ m/^#=GR/;
             my @split_next_line = split(/\s+/, $next_line);
             my ($tag,$name_next,$feat,$mark)  = @split_next_line;
-            # my $id_next = $name_next && $name_next =~ m/(.+)\// ? $1 : $name_next;
-            # print "$name does"
+            my $id_next = $name_next && $name_next =~ m/(.+)\// ? $1 : $name_next;
+            print "$name doesn't match with #=GR PP line\n" if $id_next ne $id;
             next if $feat ne "PP";
             my $begin_PP = $info->{$id}->{$seenids{$id}}->{PP};
             my $PP = defined($begin_PP) ? "${begin_PP}$mark": $mark;
@@ -1135,9 +1147,10 @@ sub ReadStockholmMultAligns {
 
     while ( my ($id, $value) = each(%global_seenids) ) { 
           my $mod   = $value % $nb_block_with_seq;
-          print "Sequence $id not present in all block\n" if $mod != 0;
+          die "Sequence $id not present in all block\n" if $mod != 0;
     }
     
+    my $length_stand = 0;
     for my $id ( keys %$info ) {
         my $info_for_id = $info->{$id};
         my $nb_dupli    = scalar( keys %$info_for_id);
@@ -1147,6 +1160,13 @@ sub ReadStockholmMultAligns {
             my $id  = $nb_dupli == 1 ? $id : "${num_dupli}${id}";
             my $seq = $info_for_dupli->{seq};
             my $PP  = $info_for_dupli->{PP};
+            my $length_PP    = length($PP) if $PP;
+            my $length_seq   = length($seq);
+            $length_stand = $length_seq if $length_stand == 0;
+            die "PP and sequence haven't same length for $id\n" 
+                if $PP && $length_PP != $length_seq;
+            die "$id haven't standard length\n" 
+                if $length_seq != $length_stand;
             $seqobj = new PirObject::AlignedSeq(
                 seqId        => $id,
                 sequence     => $seq,
@@ -1155,6 +1175,9 @@ sub ReadStockholmMultAligns {
             push(@$seqlist,$seqobj);
         }
     }
+    my $length_PP_cons  = length($PP_cons);
+    die "PP_cons haven't standard length\n"
+        if $length_PP_cons && $length_PP_cons != $length_stand;
     
     $text = []; # Zap input array text, free memory
             
@@ -1183,6 +1206,7 @@ sub FilteringStockholm {
        $GlobalPercent = 0  if $GLOBALPERCENT eq ".";
        
     my $columnToRemove = ();
+
     for ( my $i = 0 ; $i < length($PP_cons) ; $i++) {
         my $PP_val = substr($PP_cons,$i,1);
         $PP_val    =  0 if $PP_val eq ".";
@@ -1207,7 +1231,44 @@ sub FilteringStockholm {
             substr($Seq,$i,1) = ""  if $cols_to_remove{$i};
         }
         $alignedSeq->set_sequence($Seq);
-    }    
+    }
+
+    #Treat Dash    
+    # Make array nb of dash foreach pos
+    my $Dash = ();
+    my $DashPercent  = $DASHPERCENT;
+    foreach my $alignedSeq (@$alignedSeqs) {
+        my $Seq = $alignedSeq->get_sequence();
+        # Treat DASHPERCENT
+        for ( my $i = 0 ; $i < length($Seq) ; $i++) {
+            my $val = $Dash->[$i] || 0;
+            my $aa = substr($Seq,$i,1);
+            $val++ if $aa eq "-";
+            $Dash->[$i] = $val;
+        }
+    }
+
+    #Make array with pos to remove use DASHPERCENT
+    my $nb_seq = scalar(@$alignedSeqs);
+    my $Dash_Percent = $DASHPERCENT;
+    $columnToRemove = ();
+    for ( my $i = 0 ; $i < @$Dash ; $i++) {
+        my $val     = $Dash->[$i];
+        my $Dash_per = 100 - ($val*100)/$nb_seq;
+        push(@$columnToRemove,$i) if $Dash_per <= $DashPercent;
+    }
+    
+    #Remove dash percent
+    %cols_to_remove = ();
+    %cols_to_remove = map { $_ => 1 } @$columnToRemove;
+    foreach my $alignedSeq (@$alignedSeqs) {
+        my $Seq = $alignedSeq->get_sequence();
+        #Treat DASHPERCENT
+        for (my $i = length($Seq) - 1; $i >= 0 ; $i--) {
+            substr($Seq,$i,1) = ""  if $cols_to_remove{$i};
+        }
+        $alignedSeq->set_sequence($Seq);
+    }
 }
 
 sub DumpStockholmMultAligns {
