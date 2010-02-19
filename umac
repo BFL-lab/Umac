@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.19 2010/02/19 23:16:43 nbeck Exp $
+#    $Id: umac,v 1.20 2010/02/19 23:37:22 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.20  2010/02/19 23:37:22  nbeck
+#    Fixed bug with -F option.
+#
 #    Revision 1.19  2010/02/19 23:16:43  nbeck
 #    Added option -n and added verification for STOCKHOLM format.
 #
@@ -90,7 +93,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.19 2010/02/19 23:16:43 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.20 2010/02/19 23:37:22 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -116,8 +119,11 @@ my $KEEPALLCHARS=0;
 my $STRUCTURES=0;
 my $FILTERING=0;
 my $GLOBALPERCENT='*';
+my $HAVEGLOBAL=-1;
 my $LOCALPERCENT='*';
+my $HAVELOCAL=-1;
 my $DASHPERCENT=70;
+my $HAVEDASH=-1;
 
 # Long decription of each format's short keyword
 my %FORMAT_LONG = (
@@ -216,12 +222,15 @@ for (;@ARGV;) {
     $GLOBALPERCENT=$arg                           if $opt eq 'g';
     $LOCALPERCENT=$arg                            if $opt eq 's';
     $DASHPERCENT=$arg                             if $opt eq 'n';
+    $HAVEGLOBAL=1                                 if $opt eq 'g';
+    $HAVELOCAL=1                                  if $opt eq 's';
+    $HAVEDASH=1                                   if $opt eq 'n';
 
     shift @ARGV;
 }
 
 die "Must add -F option if you want use -g or -s or -p\n"
-    if $FILTERING == 0 && ( $GLOBALPERCENT != -1 || $LOCALPERCENT != -1 || $DASHPERCENT !=- 1 );
+    if $FILTERING == 0 && ( $HAVEGLOBAL != -1 || $HAVELOCAL != -1 || $HAVEDASH !=- 1 );
 
 die "-g value must be under 0 and 9 or * for 10 and . for 0\n"
    if !($GLOBALPERCENT eq "*" || $GLOBALPERCENT eq "."
