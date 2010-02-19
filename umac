@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.17 2010/02/18 21:42:16 nbeck Exp $
+#    $Id: umac,v 1.18 2010/02/19 22:31:51 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.18  2010/02/19 22:31:51  nbeck
+#    Fixed bug about last STOCKHOLM block.
+#
 #    Revision 1.17  2010/02/18 21:42:16  nbeck
 #    Changed ReadStockholmMultAligns in order to fix some bug.
 #
@@ -84,7 +87,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.17 2010/02/18 21:42:16 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.18 2010/02/19 22:31:51 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1068,8 +1071,9 @@ sub ReadStockholmMultAligns {
     my $block      = ();
     my $i          = 0;
     while (@$text) {
-        my $line = shift(@$text);
-        if ($line !~ m/^\n$/) {
+        my $line   = shift(@$text);
+        my $isLast = 1 if scalar(@$text) == 0;
+        if ($line !~ m/^\n$/ && !$isLast) {
             push(@$block,$line);
         }
         else {
