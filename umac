@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.20 2010/02/19 23:37:22 nbeck Exp $
+#    $Id: umac,v 1.21 2010/03/11 21:23:05 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.21  2010/03/11 21:23:05  nbeck
+#    Fixed bug with Stockholm format.
+#
 #    Revision 1.20  2010/02/19 23:37:22  nbeck
 #    Fixed bug with -F option.
 #
@@ -93,7 +96,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.20 2010/02/19 23:37:22 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.21 2010/03/11 21:23:05 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1112,7 +1115,9 @@ sub ReadStockholmMultAligns {
     my $seqobj            = undef;
     my ($PP_cons,$RF)     = ("","");
     
-    foreach my $key (sort (keys(%$each_block))) {
+    
+    my @sorted = sort { $each_block->{$a} <=> $each_block->{$b} } keys %$each_block;
+    foreach my $key (@sorted) {
         $block  = $each_block->{$key};
         my $nb_seq = 0;
         my %seenids = ();
