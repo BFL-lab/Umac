@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.21 2010/03/11 21:23:05 nbeck Exp $
+#    $Id: umac,v 1.22 2010/03/24 16:16:36 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.22  2010/03/24 16:16:36  nbeck
+#    Fixed bug with sort.
+#
 #    Revision 1.21  2010/03/11 21:23:05  nbeck
 #    Fixed bug with Stockholm format.
 #
@@ -96,7 +99,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.21 2010/03/11 21:23:05 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.22 2010/03/24 16:16:36 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1114,9 +1117,10 @@ sub ReadStockholmMultAligns {
     my $seqlist           = [];
     my $seqobj            = undef;
     my ($PP_cons,$RF)     = ("","");
-    
-    
-    my @sorted = sort { $each_block->{$a} <=> $each_block->{$b} } keys %$each_block;
+
+    my @sorted = ();
+    while (my ($key, $value) = each( %$each_block)){ push (@sorted,$key);}
+    @sorted = sort { $a <=> $b } @sorted;
     foreach my $key (@sorted) {
         $block  = $each_block->{$key};
         my $nb_seq = 0;
