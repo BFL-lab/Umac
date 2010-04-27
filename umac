@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.22 2010/03/24 16:16:36 nbeck Exp $
+#    $Id: umac,v 1.23 2010/04/27 19:40:10 nbeck Exp $
 #
 #    $Log: umac,v $
+#    Revision 1.23  2010/04/27 19:40:10  nbeck
+#    Fixed long name in stokholm.
+#
 #    Revision 1.22  2010/03/24 16:16:36  nbeck
 #    Fixed bug with sort.
 #
@@ -99,7 +102,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.22 2010/03/24 16:16:36 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.23 2010/04/27 19:40:10 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1319,6 +1322,18 @@ sub DumpStockholmMultAligns {
         }
 
         print $fh "# STOCKHOLM 1.0\n";
+        
+        my $DupliName = {};
+        for (my $s=0; $s < @$seqlist;$s++) {
+            my $seqobj = $seqlist->[$s];
+            my $id = $seqobj->get_seqId() || "Unknown";
+            $id = substr($id,0,$namelen) if length($id) > $namelen;
+            $DupliName->{$id}++;
+        }
+        
+        while ( my ($key, $value) = each(%$DupliName) ) {
+            delete $DupliName->{$key} if $value == 1;
+        }
 
         for (my $i=0;$i < $seqlen;$i += $maxlen) {
             print $fh "\n";
@@ -1328,13 +1343,23 @@ sub DumpStockholmMultAligns {
                 my $remain = length($seq) - $i;
                 $remain = 0 if ($remain <= 0);
                 my $subseq = substr($seq,$i, $remain < $maxlen ? $remain : $maxlen);
+                
                 my $id = $seqobj->get_seqId() || "Unknown";
-                $id = substr($id,0,$namelen) if length($id) > $namelen;
-                $id .= " " while length($id) < $namelen;
+                   $id = $seqobj->get_shortSeqId() || $seqobj->get_seqId() || "Unknow";
+                my $isShort = $seqobj->get_shortSeqId() ? 1 : 0;
+                
+                if (!$isShort) { 
+                    $id = substr($id,0,$namelen) if length($id) > $namelen;
+                    my $num = $DupliName->{$id} || 0;
+                    $DupliName->{$id}--;
+                    $id = substr($id,0,$namelen-(length($num)+1)) if $num != 0;
+                    $id = "${num}_$id" if $num != 0;
+                    $id .= " " while length($id) < $namelen;
+                }
                 print $fh $id," ",$subseq,"\n";
+                $seqobj->set_shortSeqId($id);
             }
         }
-
         print $fh "//\n";
     }
 }
