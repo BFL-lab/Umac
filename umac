@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.24 2010/05/04 20:41:01 nbeck Exp $ 
+#    $Id: umac,v 1.25 2011/09/29 13:06:40 nbeck Exp $ 
 #
 #    $Log: umac,v $
+#    Revision 1.25  2011/09/29 13:06:40  nbeck
+#    iMade more flexible for FSA stockholm.
+#
 #    Revision 1.24  2010/05/04 20:41:01  nbeck
 #    Fixed long name with duplication in stockholm.
 #
@@ -105,7 +108,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.24 2010/05/04 20:41:01 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.25 2011/09/29 13:06:40 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1136,7 +1139,7 @@ sub ReadStockholmMultAligns {
             #Treat #=GC
             if ($line =~ m/#=GC\s*/) {
                 my @split = split(/\s+/, $line);
-                $PP_cons .= $split[-1] if $line =~ m/PP_cons/;
+                $PP_cons .= $split[-1] if $line =~ m/PP_cons/ || $line =~ m/GC Accuracy/;
                 $RF      .= $split[-1] if $line =~ m/RF/;
             }
             
@@ -1224,38 +1227,40 @@ sub FilteringStockholm {
         if $PP_cons eq "";
     my $alignedSeqs = $ma->get_alignedSeqs();
 
-    #Make array with pos to remove use GLOBALPERCENT
-    my $GlobalPercent = $GLOBALPERCENT;
-       $GlobalPercent = 10 if $GLOBALPERCENT eq "*";
-       $GlobalPercent = 0  if $GLOBALPERCENT eq ".";
-       
-    my $columnToRemove = ();
+	my $columnToRemove = ();
 
-    for ( my $i = 0 ; $i < length($PP_cons) ; $i++) {
-        my $PP_val = substr($PP_cons,$i,1);
-        $PP_val    =  0 if $PP_val eq ".";
-        $PP_val    = 10 if $PP_val eq "*";
-        push(@$columnToRemove,$i) if $PP_val < $GlobalPercent;
-    }
+	#Make array with pos to remove use GLOBALPERCENT
+	my $GlobalPercent = $GLOBALPERCENT;
+	   $GlobalPercent = 10 if $GLOBALPERCENT eq "*";
+	   $GlobalPercent = 0  if $GLOBALPERCENT eq ".";
+
+	for ( my $i = 0 ; $i < length($PP_cons) ; $i++) {
+		my $PP_val = substr($PP_cons,$i,1);
+		$PP_val    =  0 if $PP_val eq ".";
+		$PP_val    = 10 if $PP_val eq "*";
+		push(@$columnToRemove,$i) if $PP_val < $GlobalPercent;
+	}
     
+	my %cols_to_remove = map { $_ => 1 } @$columnToRemove;
     #Treat each Seq with LOCALPERCENT and GLOBALPERCENT
-    my $LocalPercent = $LOCALPERCENT;
-       $LocalPercent = 10 if $LOCALPERCENT eq "*";
-       $LocalPercent = 0  if $LOCALPERCENT eq ".";
-    my %cols_to_remove = map { $_ => 1 } @$columnToRemove;
-    foreach my $alignedSeq (@$alignedSeqs) {
-        my $PP  = $alignedSeq->get_PP();
-        my $Seq = $alignedSeq->get_sequence();
-        #Treat LOCALPERCENT
-        for (my $i = length($Seq) - 1; $i >= 0 ; $i--) {
-            my $PP_val = substr($PP,$i,1);
-            $PP_val    =  0  if $PP_val eq ".";
-            $PP_val    = 10  if $PP_val eq "*";
-            substr($Seq,$i,1) = "-" if $PP_val < $LocalPercent;
-            substr($Seq,$i,1) = ""  if $cols_to_remove{$i};
-        }
-        $alignedSeq->set_sequence($Seq);
-    }
+	my $LocalPercent = $LOCALPERCENT;
+	   $LocalPercent = 10 if $LOCALPERCENT eq "*";
+	   $LocalPercent = 0  if $LOCALPERCENT eq ".";
+	foreach my $alignedSeq (@$alignedSeqs) {
+		my $PP  = $alignedSeq->get_PP();
+		my $Seq = $alignedSeq->get_sequence();
+		#Treat LOCALPERCENT
+		for (my $i = length($Seq) - 1; $i >= 0 ; $i--) {
+			if ($HAVELOCAL != -1) {
+				my $PP_val = substr($PP,$i,1);
+				$PP_val    =  0  if $PP_val eq ".";
+				$PP_val    = 10  if $PP_val eq "*";
+				substr($Seq,$i,1) = "-" if $PP_val < $LocalPercent;
+			}
+			substr($Seq,$i,1) = ""  if $cols_to_remove{$i};
+		}
+		$alignedSeq->set_sequence($Seq);
+	}
 
     #Treat Dash    
     # Make array nb of dash foreach pos
