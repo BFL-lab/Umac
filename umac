@@ -11,9 +11,12 @@
 
 ##############################################################################
 #
-#    $Id: umac,v 1.25 2011/09/29 13:06:40 nbeck Exp $ 
+#    $Id: umac,v 1.26 2011/12/29 16:26:35 nbeck Exp $ 
 #
 #    $Log: umac,v $
+#    Revision 1.26  2011/12/29 16:26:35  nbeck
+#    Fixed array.
+#
 #    Revision 1.25  2011/09/29 13:06:40  nbeck
 #    iMade more flexible for FSA stockholm.
 #
@@ -108,7 +111,7 @@ use File::Path;
 umask 027;
 
 # Program's name and version number.
-$RCS_VERSION='$Id: umac,v 1.25 2011/09/29 13:06:40 nbeck Exp $';
+$RCS_VERSION='$Id: umac,v 1.26 2011/12/29 16:26:35 nbeck Exp $';
 ($VERSION) = ($RCS_VERSION =~ m#,v ([\w\.]+)#);
 my ($BASENAME) = ($0 =~ /([^\/]+)$/);
 
@@ -1264,7 +1267,7 @@ sub FilteringStockholm {
 
     #Treat Dash    
     # Make array nb of dash foreach pos
-    my $Dash = ();
+    my $Dash = [];
     my $DashPercent  = $DASHPERCENT;
     foreach my $alignedSeq (@$alignedSeqs) {
         my $Seq = $alignedSeq->get_sequence();
