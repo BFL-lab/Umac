@@ -1,5 +1,3 @@
-[![Software License][ico-license]](LICENSE.md)
-
 # umac
 
 Umac is a multiple alignment converter.
