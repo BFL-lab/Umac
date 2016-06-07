@@ -4,7 +4,11 @@ Umac is a multiple alignment converter.
 
 This package is based on activities of the OGMP, and becomes open source as part of MFannot.
 
-# Usage
+## Install
+
+To install umac you just need to copy the `umac` file in one of your executable directory (e.g: a directory list in $PATH).
+
+## Usage
 
 Usage: umac [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent -n nt_percent]
 
@@ -24,7 +28,7 @@ Usage: umac [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o
 Leaving -i and/or -o blank or supplying a single '-' can be used
 to mean STDIN or STDOUT for the files.
 
-# List of known formats and the programs which use them
+#### List of known formats and the programs which use them
 
 Format (-f) | Description | Programs (-p)
 ------------|-------------|---------------
@@ -36,3 +40,15 @@ Phylip-I    | Phylip interleaved      |  IQPNNI, RAxMLHPC
 Phylip-N    | Phylip non-interleaved  |  pb
 RAW         | Raw (one line per seq)  |  RNAfold
 STOCKHOLM   | Stockholm (interleaved) |  hmmer, infernal
+
+## Contributing
+
+Please see [CONTRIBUTING](CONTRIBUTING.md) and [CONDUCT](CONDUCT.md) for details.
+
+## Credits
+
+- [All Contributors](https://github.com/natacha-beck/bf-umac/graphs/contributors)
+
+## License
+
+GNU General Public License v3.0. Please see [License File](LICENSE.md) for more information.
