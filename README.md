@@ -1,14 +1,10 @@
 # umac
 
-This is umac 1.26
-
 Umac is a multiple alignment converter.
 
 This package is based on activities of the OGMP, and becomes open source as part of MFannot.
 
 # Usage
-
-This is umac 1.26
 
 Usage: umac [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent -n nt_percent]
 
