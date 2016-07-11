@@ -2,7 +2,8 @@
 
 Umac is a multiple alignment converter.
 
-This package is based on activities of the OGMP, and becomes open source as part of [MFannot](https://github.com/BFL-lab/MFannot).
+This package is based on activities of the [OGMP](http://megasun.bch.umontreal.ca/ogmp/) (i.e, priori to 2002), and
+becomes open source as part of [MFannot](http://megasun.bch.umontreal.ca/RNAweasel/).
 
 ## Install
 
