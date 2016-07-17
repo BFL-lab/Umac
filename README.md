@@ -11,7 +11,7 @@ To install umac you just need to copy the `umac` file in one of your executable 
 
 ## Usage
 
-Usage: umac [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent -n nt_percent]
+umac [-@[n]] [-v] [-c] [-K] [-S #] [-f format|-p program] [-i infile] [-o outfile] [-F -g global_percent -s sp_percent -n nt_percent]
 
 - i is the input file, containing one or many multiple alignments
 - o is the output file, converted
