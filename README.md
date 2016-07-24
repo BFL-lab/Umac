@@ -11,7 +11,7 @@ To install umac you just need to copy the `umac` file in one of your executable 
 
 ## Usage
 
-In order to get the the help page of umac you need to type `umac -h` in your terminal.
+In order to get the help page of umac you need to type `umac -h` in your terminal.
 
 #### List of known formats and the programs which use them
 
