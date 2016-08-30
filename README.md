@@ -7,7 +7,11 @@ becomes open source as part of [MFannot](http://megasun.bch.umontreal.ca/RNAweas
 
 ## Install
 
-To install umac you just need to copy the `umac` file in one of your executable directory (e.g: a directory list in $PATH). **Note**: At this point the installation of umac was only tested on Unix system (Ubuntu and CentOS).
+1. Install the [PirObject](https://github.com/prioux/PirObject) library.
+2. Install all the necessary [PirModels](https://github.com/BFL-lab/PirModels).
+3. Copy `umac` in one of your executable directory (e.g: a directory list in $PATH).
+
+**Note**: At this point the installation of umac was only tested on Unix system (Ubuntu and CentOS).
 
 ## Usage
 
@@ -32,7 +36,7 @@ Please see [CONTRIBUTING](CONTRIBUTING.md) and [CONDUCT](CONDUCT.md) for details
 
 ## Credits
 
-- [All Contributors](https://github.com/natacha-beck/bf-umac/graphs/contributors)
+- [All Contributors](https://github.com/BFL-lab/umac/graphs/contributors)
 
 ## License
 
